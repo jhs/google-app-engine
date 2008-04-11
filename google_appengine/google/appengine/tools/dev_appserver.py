@@ -1862,7 +1862,10 @@ class StaticFileMimeTypeMatcher(object):
         if handler_type == appinfo.STATIC_FILES:
           regex = entry.upload
         else:
-          regex = os.path.join(entry.static_dir, r'(.*)')
+          static_dir = entry.static_dir
+          if static_dir[-1] == '/':
+            static_dir = static_dir[:-1]
+          regex = '/'.join((entry.static_dir, r'(.*)'))
 
         adjusted_regex = r'^%s$' % path_adjuster.AdjustPath(regex)
         try:
@@ -2113,7 +2116,6 @@ def _ClearTemplateCache(module_dict=sys.modules):
   template_module = module_dict.get('google.appengine.ext.webapp.template')
   if template_module is not None:
     template_module.template_cache.clear()
-    template_module.parser_cache.clear()
 
 
 def CreateRequestHandler(root_path, login_url, require_indexes=False):
@@ -2366,8 +2368,16 @@ def CreateURLMatcherFromMaps(root_path,
     regex = url_map.url
     path = url_map.GetHandler()
     if handler_type == appinfo.STATIC_DIR:
-      regex = os.path.join(re.escape(regex), '(.*)')
-      path = os.path.join(path, '\\1')
+      if regex[-1] == r'/':
+        regex = regex[:-1]
+      if path[-1] == os.path.sep:
+        path = path[:-1]
+      regex = '/'.join((re.escape(regex), '(.*)'))
+      if os.path.sep == '\\':
+        backref = r'\\1'
+      else:
+        backref = r'\1'
+      path = os.path.normpath(path) + os.path.sep + backref
 
     url_matcher.AddURL(regex,
                        dispatcher,

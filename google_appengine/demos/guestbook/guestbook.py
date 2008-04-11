@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 import cgi
 import datetime
 import wsgiref.handlers
@@ -35,7 +34,7 @@ class MainPage(webapp.RequestHandler):
 
     greetings = db.GqlQuery("SELECT * "
                             "FROM Greeting "
-                            "ORDER BY date DESC LIMIT 10")  
+                            "ORDER BY date DESC LIMIT 10")
 
     for greeting in greetings:
       if greeting.author:
@@ -45,7 +44,6 @@ class MainPage(webapp.RequestHandler):
       self.response.out.write('<blockquote>%s</blockquote>' %
                               cgi.escape(greeting.content))
 
-    # Write the submission form and the footer of the page
     self.response.out.write("""
           <form action="/sign" method="post">
             <div><textarea name="content" rows="3" cols="60"></textarea></div>

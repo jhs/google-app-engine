@@ -81,23 +81,6 @@ def render(template_path, template_dict, debug=False):
   return t.render(Context(template_dict))
 
 
-_original_template_render = django.template.Template.render
-
-_render_stack = []
-def _template_render_replacement(self, context):
-  """Wrapper for Django's built in Template.render function.
-
-  Maintains a stack of the templates that are being rendered so that parsed
-  templates can be properly cached.
-  """
-  _render_stack.append(self.name)
-  try:
-    return _original_template_render(self, context)
-  finally:
-    _render_stack.pop()
-django.template.Template.render = _template_render_replacement
-
-
 template_cache = {}
 def load(path, debug=False):
   """Loads the Django template from the given path.
@@ -174,30 +157,6 @@ def _swap_settings(new):
     old[key] = getattr(settings, key, None)
     setattr(settings, key, value)
   return old
-
-
-parser_cache = {}
-_original_template_compile_string = django.template.compile_string
-
-def _compile_string_replacement(template_string, origin):
-  """Replacement for Django's built-in compile_string() function that caches.
-  """
-  debug = django.conf.settings.TEMPLATE_DEBUG
-  if not debug:
-    template_hash = md5.md5(template_string).digest()
-    key = (template_hash, origin) + tuple(_render_stack)
-    nodelist = parser_cache.get(key, None)
-  else:
-    nodelist = None
-
-  if not nodelist:
-    nodelist = _original_template_compile_string(template_string, origin)
-    if not debug:
-      parser_cache[key] = nodelist
-
-  return nodelist
-
-django.template.compile_string = _compile_string_replacement
 
 
 def create_template_register():

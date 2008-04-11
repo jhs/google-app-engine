@@ -247,7 +247,7 @@ class AbstractRpcServer(object):
 
   def Send(self, request_path, payload="",
            content_type="application/octet-stream",
-           timeout=60,
+           timeout=None,
            **kwargs):
     """Sends an RPC and returns the response.
 
@@ -255,6 +255,8 @@ class AbstractRpcServer(object):
       request_path: The path to send the request to, eg /api/appversion/create.
       payload: The body of the request, or None to send an empty request.
       content_type: The Content-Type header to use.
+      timeout: timeout in seconds; default None i.e. no timeout.
+        (Note: for large requests on OS X, the timeout doesn't work right.)
       kwargs: Any keyword arguments are converted into query string parameters.
 
     Returns:
