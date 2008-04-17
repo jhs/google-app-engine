@@ -117,10 +117,14 @@ class User(object):
   def __repr__(self):
     return "users.User(email='%s')" % self.email()
 
+  def __hash__(self):
+    return hash((self.__email, self.__auth_domain))
+
   def __cmp__(self, other):
     if not isinstance(other, User):
       return NotImplemented
-    return cmp(self.__email, other.__email)
+    return cmp((self.__email, self.__auth_domain),
+               (other.__email, other.__auth_domain))
 
 
 def create_login_url(dest_url):

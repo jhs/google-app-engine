@@ -54,7 +54,6 @@ Key = datastore_types.Key
 typename = datastore_types.typename
 
 _txes = {}
-_tx_entity_groups = {}
 
 
 def NormalizeAndTypeCheck(arg, types):
@@ -139,12 +138,12 @@ def Put(entities):
   """
   entities, multiple = NormalizeAndTypeCheck(entities, Entity)
 
-  entity_group = entities[0]._entity_group()
+  entity_group = entities[0].entity_group()
   for entity in entities:
     if not entity.kind() or not entity.app():
       raise datastore_errors.BadRequestError(
           'App and kind must not be empty, in entity: %s' % entity)
-    elif entity._entity_group() != entity_group:
+    elif entity.entity_group() != entity_group:
       raise datastore_errors.BadRequestError(
           'All entities must be in the same entity group.')
 
@@ -239,9 +238,9 @@ def Delete(keys):
   """
   keys, _ = NormalizeAndTypeCheckKeys(keys)
 
-  entity_group = keys[0]._entity_group()
+  entity_group = keys[0].entity_group()
   for key in keys:
-    if key._entity_group() != entity_group:
+    if key.entity_group() != entity_group:
       raise datastore_errors.BadRequestError(
           'All keys must be in the same entity group.')
 
@@ -326,10 +325,13 @@ class Entity(dict):
     """
     return self.key().parent()
 
-  def _entity_group(self):
-    """Returns this entitys's entity group as a Key, or None.
+  def entity_group(self):
+    """Returns this entitys's entity group as a Key.
+
+    Note that the returned Key will be incomplete if this is a a root entity
+    and its key is incomplete.
     """
-    return self.key()._entity_group()
+    return self.key().entity_group()
 
   def __setitem__(self, name, value):
     """Implements the [] operator. Used to set property value(s).
@@ -839,7 +841,7 @@ class Query(dict):
     This is not intended to be used by application developers. Use Get()
     instead!
     """
-    if _FindTransactionInStack():
+    if _CurrentTransactionKey():
       raise datastore_errors.BadRequestError(
         "Can't query inside a transaction.")
 
@@ -1222,6 +1224,18 @@ class Iterator(object):
     return Iterator(pb.cursor())
 
 
+class _Transaction(object):
+  """Encapsulates a transaction currently in progress.
+
+  If we've sent a BeginTransaction call, then handle will be a
+  datastore_pb.Transaction that holds the transaction handle.
+
+  If we know the entity group for this transaction, it's stored in entity_group.
+  """
+  handle = None
+  entity_group = None
+
+
 def RunInTransaction(function, *args, **kwargs):
   """Runs a function inside a datastore transaction.
 
@@ -1274,7 +1288,7 @@ def RunInTransaction(function, *args, **kwargs):
 
   - Durable. On commit, all writes are persisted to the datastore.
 
-  Nested transactions are not yet supported.
+  Nested transactions are not supported.
 
   Args:
     # a function to be run inside the transaction
@@ -1288,25 +1302,29 @@ def RunInTransaction(function, *args, **kwargs):
   Raises:
     TransactionFailedError, if the transaction could not be committed.
   """
-  frame = None
+
+  if _CurrentTransactionKey():
+    raise datastore_errors.BadRequestError(
+      'Nested transactions are not supported.')
+
+  tx_key = None
 
   try:
-    if _FindTransactionInStack():
-      raise datastore_errors.BadRequestError(
-        'Nested transactions are not yet supported.')
+    tx_key = _NewTransactionKey()
+    tx = _Transaction()
+    _txes[tx_key] = tx
 
-    frame = sys._getframe()
     for i in range(0, TRANSACTION_RETRIES + 1):
       try:
         result = function(*args, **kwargs)
       except:
         original_exception = sys.exc_info()
 
-        if frame in _txes:
+        if tx.handle:
           try:
             resp = api_base_pb.VoidProto()
             apiproxy_stub_map.MakeSyncCall('datastore_v3', 'Rollback',
-                                           _txes[frame], resp)
+                                           tx.handle, resp)
           except:
             exc_info = sys.exc_info()
             logging.info('Exception sending Rollback:\n' +
@@ -1318,21 +1336,19 @@ def RunInTransaction(function, *args, **kwargs):
         else:
           raise type, value, trace
 
-      if frame in _txes:
+      if tx.handle:
         try:
-          try:
-            resp = api_base_pb.VoidProto()
-            apiproxy_stub_map.MakeSyncCall('datastore_v3', 'Commit',
-                                           _txes[frame], resp)
-          except apiproxy_errors.ApplicationError, err:
-            if (err.application_error ==
-                datastore_pb.Error.CONCURRENT_TRANSACTION):
-              logging.warning('Transaction collision for entity group with '
-                              'key %r', _tx_entity_groups[frame])
-              continue
-        finally:
-          del _txes[frame]
-          del _tx_entity_groups[frame]
+          resp = api_base_pb.VoidProto()
+          apiproxy_stub_map.MakeSyncCall('datastore_v3', 'Commit',
+                                         tx.handle, resp)
+        except apiproxy_errors.ApplicationError, err:
+          if (err.application_error ==
+              datastore_pb.Error.CONCURRENT_TRANSACTION):
+            logging.warning('Transaction collision for entity group with '
+                            'key %r', tx.entity_group)
+            tx.handle = None
+            tx.entity_group = None
+            continue
 
       return result
 
@@ -1340,18 +1356,17 @@ def RunInTransaction(function, *args, **kwargs):
       'The transaction could not be committed. Please try again.')
 
   finally:
-    if frame in _txes:
-      del _txes[frame]
-      del _tx_entity_groups[frame]
-    del frame
+    if tx_key in _txes:
+      del _txes[tx_key]
+    del tx_key
 
 
 def _MaybeSetupTransaction(request, key_or_entity):
   """Begins a transaction, and populates it in the request, if necessary.
 
-  If we're currently inside a transaction, this records the entity group,
-  creates the transaction PB, and sends the BeginTransaction. It then
-  populates the transaction handle in the request.
+  If we're currently inside a transaction, this records the entity group (if
+  possible), creates the transaction PB, and sends the BeginTransaction. It
+  then populates the transaction handle in the request.
 
   Raises BadRequestError if the entity has a different entity group than the
   current transaction.
@@ -1363,39 +1378,54 @@ def _MaybeSetupTransaction(request, key_or_entity):
   assert isinstance(request, (datastore_pb.GetRequest, datastore_pb.PutRequest,
                               datastore_pb.DeleteRequest))
   assert isinstance(key_or_entity, (Key, Entity))
-  frame = None
+  tx_key = None
 
   try:
-    frame = _FindTransactionInStack()
-    if frame:
-      this_group = key_or_entity._entity_group()
-      if frame not in _txes:
-        _txes[frame] = datastore_pb.Transaction()
-        _tx_entity_groups[frame] = this_group
+    tx_key = _CurrentTransactionKey()
+    if tx_key:
+      tx = _txes[tx_key]
+      if not tx.handle:
+        tx.handle = datastore_pb.Transaction()
         req = api_base_pb.VoidProto()
         apiproxy_stub_map.MakeSyncCall('datastore_v3', 'BeginTransaction', req,
-                                       _txes[frame])
-      else:
-        orig_group = _tx_entity_groups[frame]
-        if orig_group != this_group:
-          def id_or_name(key):
-            if (key.name()):
-              return 'name=%r' % key.name()
-            else:
-              return 'id=%r' % key.id()
-          raise datastore_errors.BadRequestError(
-            'Cannot operate on different entity groups in a transaction: '
-            '(kind=%r, %s) and (kind=%r, %s).' %
-            (orig_group.kind(), id_or_name(orig_group),
-             this_group.kind(), id_or_name(this_group)))
+                                       tx.handle)
 
-      request.mutable_transaction().CopyFrom(_txes[frame])
+      request.mutable_transaction().CopyFrom(tx.handle)
+
+      this_group = key_or_entity.entity_group()
+      if not tx.entity_group:
+        if this_group.has_id_or_name():
+          tx.entity_group = this_group
+      else:
+        if tx.entity_group != this_group:
+          raise _DifferentEntityGroupError(tx.entity_group, this_group)
 
   finally:
-    del frame
+    del tx_key
 
 
-def _FindTransactionInStack():
+def _DifferentEntityGroupError(a, b):
+  """Raises a BadRequestError that says the given entity groups are different.
+
+  Includes the two entity groups in the message, formatted more clearly and
+  concisely than repr(Key).
+
+  Args:
+    a, b are both Keys that represent entity groups.
+  """
+  def id_or_name(key):
+    if key.name():
+      return 'name=%r' % key.name()
+    else:
+      return 'id=%r' % key.id()
+
+  raise datastore_errors.BadRequestError(
+    'Cannot operate on different entity groups in a transaction: '
+    '(kind=%r, %s) and (kind=%r, %s).' % (a.kind(), id_or_name(a),
+                                          b.kind(), id_or_name(b)))
+
+
+def _FindTransactionFrameInStack():
   """Walks the stack to find a RunInTransaction() call.
 
   Returns:
@@ -1413,6 +1443,10 @@ def _FindTransactionInStack():
     frame = frame.f_back
 
   return None
+
+_CurrentTransactionKey = _FindTransactionFrameInStack
+
+_NewTransactionKey = sys._getframe
 
 
 def _GetCompleteKeyOrError(arg):

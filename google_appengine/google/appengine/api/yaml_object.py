@@ -44,6 +44,7 @@ class _ObjectMapper(object):
   def __init__(self):
     """Object mapper starts off with empty value."""
     self.value = None
+    self.seen = set()
 
   def set_value(self, value):
     """Set value of instance to map to.
@@ -53,6 +54,10 @@ class _ObjectMapper(object):
     """
     self.value = value
 
+  def see(self, key):
+    if key in self.seen:
+      raise yaml_errors.DuplicateAttribute("Duplicate attribute '%s'." % key)
+    self.seen.add(key)
 
 class _ObjectSequencer(object):
   """Wrapper used for building sequences from a yaml file to a list.
@@ -197,6 +202,7 @@ class ObjectBuilder(yaml_builder.Builder):
       value.set_constructor(self._GetRepeated(subject.value.ATTRIBUTES[key]))
       value = value.value
 
+    subject.see(key)
     try:
       setattr(subject.value, key, value)
     except validation.ValidationError, e:
@@ -213,7 +219,7 @@ class ObjectBuilder(yaml_builder.Builder):
       e.message = ("Unable to assign value '%s' to attribute '%s':\n%s" %
                    (value_str, key, error_str))
       raise e
-    except Exception:
+    except Exception, e:
       try:
         error_str = str(e)
       except Exception:

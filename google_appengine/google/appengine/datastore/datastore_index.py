@@ -277,6 +277,10 @@ def CompositeIndexForQuery(query):
   assert (len(eq_filters) + len(ineq_filters) +
           len(exists_filters)) == len(filters), 'Not all filters used'
 
+  if (kind and eq_filters and not ineq_filters and not exists_filters and
+      not orders):
+    return None
+
   ineq_property = None
   if ineq_filters:
     ineq_property = ineq_filters[0].property(0).name()

@@ -55,11 +55,16 @@ Options:
 """
 
 
+
+import os
+os.environ['TZ'] = 'UTC'
+import time
+if hasattr(time, 'tzset'):
+  time.tzset()
+
 import getopt
 import logging
-import os
 import sys
-import time
 import traceback
 import tempfile
 

@@ -31,6 +31,12 @@ Example:
 """
 
 
+import os
+os.environ['TZ'] = 'UTC'
+import time
+if hasattr(time, 'tzset'):
+  time.tzset()
+
 import __builtin__
 import BaseHTTPServer
 import Cookie
@@ -46,7 +52,6 @@ import itertools
 import logging
 import mimetools
 import mimetypes
-import os
 import pickle
 import pprint
 import random
@@ -59,7 +64,6 @@ import sre_parse
 import socket
 import sys
 import urlparse
-import time
 import traceback
 import types
 
@@ -537,11 +541,16 @@ def ClearAllButEncodingsModules(module_dict):
 
 
 def FakeURandom(n):
-  """Fake version of os.unrandom."""
+  """Fake version of os.urandom."""
   bytes = ''
   for i in xrange(n):
     bytes += chr(random.randint(0, 255))
   return bytes
+
+
+def FakeUname():
+  """Fake version of os.uname."""
+  return ('Linux', '', '', '', '')
 
 
 def IsPathInSubdirectories(filename,
@@ -1001,6 +1010,7 @@ class HardenedModulesHook(object):
       'listdir': RestrictedPathFunction(os.listdir),
       'lstat': RestrictedPathFunction(os.lstat),
       'stat': RestrictedPathFunction(os.stat),
+      'uname': FakeUname,
       'urandom': FakeURandom,
     },
 
@@ -1137,7 +1147,7 @@ class HardenedModulesHook(object):
 
     suffix, mode, file_type = description
 
-    if (file_type != self._imp.C_BUILTIN and
+    if (file_type not in (self._imp.C_BUILTIN, self._imp.C_EXTENSION) and
         not FakeFile.IsFileAccessible(pathname)):
       error_message = 'Access to module file denied: %s' % pathname
       logging.debug(error_message)
@@ -1353,6 +1363,11 @@ class HardenedModulesHook(object):
       source_code = source_file.read()
     finally:
       source_file.close()
+
+    source_code = source_code.replace('\r\n', '\n')
+    if not source_code.endswith('\n'):
+      source_code += '\n'
+
     return compile(source_code, full_path, 'exec')
 
 
@@ -2019,7 +2034,13 @@ def RewriteResponse(response_file):
 
   headers['content-length'] = str(len(body))
 
-  header_data = ''.join(headers.headers)
+  header_list = []
+  for header in headers.headers:
+    header = header.rstrip('\n')
+    header = header.rstrip('\r')
+    header_list.append(header)
+
+  header_data = '\r\n'.join(header_list) + '\r\n'
   return status_code, status_message, header_data, body
 
 

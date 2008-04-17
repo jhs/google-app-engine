@@ -288,10 +288,13 @@ class Validated(object):
     return result
 
   @staticmethod
-  def _ToValue(value):
+  def _ToValue(validator, value):
     """Convert any value to simplified collections and basic types.
 
     Args:
+      validator: An instance of Validator that corresponds with 'value'.
+        May also be 'str' or 'int' if those were used instead of a full
+        Validator.
       value: Value to convert to simplified collections.
 
     Returns:
@@ -303,8 +306,10 @@ class Validated(object):
     if isinstance(value, Validated):
       return value.ToDict()
     elif isinstance(value, (list, tuple)):
-      return [Validated._ToValue(item) for item in value]
+      return [Validated._ToValue(validator, item) for item in value]
     else:
+      if isinstance(validator, Validator):
+        return validator.ToValue(value)
       return value
 
   def ToDict(self):
@@ -323,7 +328,7 @@ class Validated(object):
     for name, validator in self.ATTRIBUTES.iteritems():
       value = getattr(self, name)
       if not(isinstance(validator, Validator) and value == validator.default):
-        result[name] = Validated._ToValue(value)
+        result[name] = Validated._ToValue(validator, value)
     return result
 
   def ToYAML(self):
@@ -375,6 +380,21 @@ class Validator(object):
 
     Returns:
       Value if value is valid, or a valid representation of value.
+    """
+    return value
+
+  def ToValue(self, value):
+    """Convert 'value' to a simplified collection or basic type.
+
+    Subclasses of Validator should override this method when the dumped
+    representation of 'value' is not simply <type>(value) (e.g. a regex).
+
+    Args:
+      value: An object of the same type that was returned from Validate().
+
+    Returns:
+      An instance of a builtin type (e.g. int, str, dict, etc).  By default
+      it returns 'value' unmodified.
     """
     return value
 
@@ -707,6 +727,10 @@ class RegexStr(Validator):
     except re.error, e:
       raise ValidationError('Value \'%s\' does not compile: %s' % (value, e), e)
     return compiled
+
+  def ToValue(self, value):
+    """Returns the RE pattern for this validator."""
+    return value.pattern
 
 
 class Range(Validator):

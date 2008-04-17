@@ -279,9 +279,11 @@ class SearchableModel(db.Model):
         query.Search(self._search_query)
       return query
 
-  def _save_to_entity(self):
-    """Wraps db.Model._save_to_entity() and injects SearchableEntity."""
-    return db.Model._save_to_entity(self, _entity_class=SearchableEntity)
+  def _populate_internal_entity(self):
+    """Wraps db.Model._populate_internal_entity() and injects
+    SearchableEntity."""
+    return db.Model._populate_internal_entity(self,
+                                              _entity_class=SearchableEntity)
 
   @classmethod
   def all(cls):

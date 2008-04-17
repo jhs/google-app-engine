@@ -546,7 +546,7 @@ class Model(object):
 
     properties = self.properties()
     for prop in self.properties().values():
-      if kwds.has_key(prop.name):
+      if prop.name in kwds:
         value = kwds[prop.name]
       else:
         value = prop.default_value()
@@ -570,8 +570,8 @@ class Model(object):
     else:
       raise NotSavedError()
 
-  def _store_to_entity(self, entity):
-    """Saves information from model to provided entity.
+  def _to_entity(self, entity):
+    """Copies information from this model to provided entity.
 
     Args:
       entity: Entity to save information on.
@@ -586,6 +586,19 @@ class Model(object):
       else:
         entity[prop.name] = datastore_value
 
+  def _populate_internal_entity(self, _entity_class=datastore.Entity):
+    """Populates self._entity, saving its state to the datastore.
+
+    After this method is called, calling is_saved() will return True.
+
+    Returns:
+      Populated self._entity
+    """
+    self._entity = self._populate_entity(_entity_class=_entity_class)
+    if hasattr(self, '_key_name'):
+      del self._key_name
+    return self._entity
+
   def put(self):
     """Writes this model instance to the datastore.
 
@@ -599,26 +612,38 @@ class Model(object):
     Raises:
       TransactionFailedError if the data could not be committed.
     """
-    self._save_to_entity()
+    self._populate_internal_entity()
     return datastore.Put(self._entity)
 
   save = put
 
-  def _save_to_entity(self, _entity_class=datastore.Entity):
-    """Internal helper -- does everything save() does execpt the Put()."""
-    if self._entity is None:
-      if self._parent is not None:
-        self._entity = _entity_class(self.kind(),
-                                     parent=self._parent._entity,
-                                     name=self._key_name,
-                                     _app=self._app)
-      else:
-        self._entity = _entity_class(self.kind(),
-                                     name=self._key_name,
-                                     _app=self._app)
-      del self._key_name
+  def _populate_entity(self, _entity_class=datastore.Entity):
+    """Internal helper -- Populate self._entity or create a new one
+    if that one does not exist.  Does not change any state of the instance
+    other than the internal state of the entity.
 
-    self._store_to_entity(self._entity)
+    This method is separate from _populate_internal_entity so that it is
+    possible to call to_xml without changing the state of an unsaved entity
+    to saved.
+
+    Returns:
+      self._entity or a new Entity which is not stored on the instance.
+    """
+    if self.is_saved():
+      entity = self._entity
+    else:
+      if self._parent is not None:
+        entity = _entity_class(self.kind(),
+                               parent=self._parent._entity,
+                               name=self._key_name,
+                               _app=self._app)
+      else:
+        entity = _entity_class(self.kind(),
+                               name=self._key_name,
+                               _app=self._app)
+
+    self._to_entity(entity)
+    return entity
 
   def delete(self):
     """Deletes this entity from the datastore.
@@ -687,8 +712,8 @@ class Model(object):
       http://www.atomenabled.org/developers/syndication/
       http://code.google.com/apis/gdata/common-elements.html
     """
-    self._save_to_entity(_entity_class)
-    return self._entity.ToXml()
+    entity = self._populate_entity(_entity_class)
+    return entity.ToXml()
 
   @classmethod
   def get(cls, keys):
@@ -761,7 +786,7 @@ class Model(object):
     """
     if isinstance(parent, Model):
       parent = parent.key()
-    ids, multiple = datastore.NormalizeAndTypeCheck(ids, int)
+    ids, multiple = datastore.NormalizeAndTypeCheck(ids, (int, long))
     keys = [datastore.Key.from_path(cls.kind(), id, parent=parent)
             for id in ids]
     if multiple:
@@ -847,7 +872,7 @@ class Model(object):
   def gql(cls, query_string, *args, **kwds):
     """Returns a query using GQL query string.
 
-    See apphosting/ext/gql for more information about GQL.
+    See appengine/ext/gql for more information about GQL.
 
     Args:
       query_string: properly formatted GQL query string with the
@@ -871,7 +896,7 @@ class Model(object):
     """
     entity_values = {}
     for prop in cls.properties().values():
-      if entity.has_key(prop.name):
+      if prop.name in entity:
         try:
           value = prop.make_value_from_datastore(entity[prop.name])
           entity_values[prop.name] = value
@@ -975,9 +1000,7 @@ def put(models):
     TransactionFailedError if the data could not be committed.
   """
   models, multiple = datastore.NormalizeAndTypeCheck(models, Model)
-  for model in models:
-    model._save_to_entity()
-  entities = [model._entity for model in models]
+  entities = [model._populate_internal_entity() for model in models]
   keys = datastore.Put(entities)
   if multiple:
     return keys
@@ -1145,7 +1168,7 @@ class Expando(Model):
     """
     return self._dynamic_properties.keys()
 
-  def _store_to_entity(self, entity):
+  def _to_entity(self, entity):
     """Store to entity, deleting dynamic properties that no longer exist.
 
     When the expando is saved, it is possible that a given property no longer
@@ -1154,7 +1177,7 @@ class Expando(Model):
     Args:
       entity: Entity which will receive dynamic properties.
     """
-    super(Expando, self)._store_to_entity(entity)
+    super(Expando, self)._to_entity(entity)
 
     for key, value in self._dynamic_properties.iteritems():
       entity[key] = value
@@ -1229,10 +1252,10 @@ class _BaseQuery(object):
     Returns:
       First result from running the query if there are any, else None.
     """
-    iterator = self.run()
+    results = self.fetch(1)
     try:
-      return iterator.next()
-    except StopIteration:
+      return results[0]
+    except IndexError:
       return None
 
   def count(self, limit=None):
@@ -1415,6 +1438,9 @@ class Query(_BaseQuery):
     Returns:
       Self to support method chaining.
     """
+    if isinstance(value, (list, tuple)):
+      raise BadValueError('Filtering on lists is not supported')
+
     if isinstance(value, Model):
       value = value.key()
     self.__query_set[property_operator] = value
@@ -1441,10 +1467,9 @@ class Query(_BaseQuery):
     else:
       order = datastore.Query.ASCENDING
 
-    properties = self._model_class.properties()
-    if not properties.has_key(property):
-      raise PropertyError('Invalid property name \'%s\'' % property)
-    prop = properties[property]
+    if not isinstance(self._model_class, Expando):
+      if property not in self._model_class.properties():
+        raise PropertyError('Invalid property name \'%s\'' % property)
 
     self.__orderings.append((property, order))
     return self
@@ -2075,10 +2100,21 @@ class ListProperty(Property):
     if value is not None:
       if not isinstance(value, list):
         raise BadValueError('Property %s must be a list' % self.name)
+
+      if self.item_type in (int, long):
+        item_type = (int, long)
+      else:
+        item_type = self.item_type
+
       for item in value:
-        if not isinstance(item, self.item_type):
-          raise BadValueError('Items in the %s list must all be %s instances' %
-                              (self.name, self.item_type.__name__))
+        if not isinstance(item, item_type):
+          if item_type == (int, long):
+            raise BadValueError('Items in the %s list must all be integers.' %
+                                self.name)
+          else:
+            raise BadValueError(
+                'Items in the %s list must all be %s instances' %
+                (self.name, self.item_type.__name__))
     return value
 
   def empty(self, value):
@@ -2215,7 +2251,7 @@ class ReferenceProperty(Property):
       reference_id = None
     if reference_id is not None:
       resolved = getattr(model_instance, self.__resolved_attr_name())
-      if resolved:
+      if resolved is not None:
         return resolved
       else:
         instance = get(reference_id)

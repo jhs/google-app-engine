@@ -62,7 +62,7 @@ Mapping between properties and fields:
 +--------------------+-------------------+--------------+--------------------+
 | StringListProperty | CharField         | list of str  | Textarea           |
 +--------------------+-------------------+--------------+--------------------+
-| URLProperty        | URLField          | str          |                    |
+| LinkProperty       | URLField          | str          |                    |
 +--------------------+-------------------+--------------+--------------------+
 | ReferenceProperty  | ModelChoiceField* | db.Model     |                    |
 +--------------------+-------------------+--------------+--------------------+
@@ -97,8 +97,6 @@ from google.appengine.ext import db
 
 def monkey_patch(name, bases, namespace):
   """A 'metaclass' for adding new methods to an existing class.
-
-
 
   In this version, existing methods can't be overridden; this is by
   design, to avoid accidents.
@@ -428,7 +426,7 @@ class StringListProperty(db.StringListProperty):
     return value
 
 
-class URLProperty(db.URLProperty):
+class LinkProperty(db.LinkProperty):
   __metaclass__ = monkey_patch
 
   def get_form_field(self, **kwargs):
@@ -438,7 +436,7 @@ class URLProperty(db.URLProperty):
     """
     defaults = {'form_class': forms.URLField}
     defaults.update(kwargs)
-    return super(URLProperty, self).get_form_field(**defaults)
+    return super(LinkProperty, self).get_form_field(**defaults)
 
 
 class _WrapIter(object):

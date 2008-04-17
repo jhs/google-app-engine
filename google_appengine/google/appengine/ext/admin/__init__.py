@@ -862,5 +862,13 @@ def main():
   wsgiref.handlers.CGIHandler().run(application)
 
 
+import django
+if django.VERSION[:2] < (0, 97):
+  from django.template import defaultfilters
+  def safe(text, dummy=None):
+    return text
+  defaultfilters.register.filter("safe", safe)
+
+
 if __name__ == '__main__':
   main()

@@ -90,8 +90,8 @@ class ClientLoginError(urllib2.HTTPError):
 class AbstractRpcServer(object):
   """Provides a common interface for a simple RPC server."""
 
-  def __init__(self, host, auth_function, host_override=None, extra_headers={},
-               save_cookies=False):
+  def __init__(self, host, auth_function, host_override=None,
+               extra_headers=None, save_cookies=False):
     """Creates a new HttpRpcServer.
 
     Args:
@@ -100,7 +100,8 @@ class AbstractRpcServer(object):
         (email, password) tuple when called. Will be called if authentication
         is required.
       host_override: The host header to send to the server (defaults to host).
-      extra_headers: A dict of extra headers to append to every request.
+      extra_headers: A dict of extra headers to append to every request. Values
+        supplied here will override other default headers that are supplied.
       save_cookies: If True, save the authentication cookies to local disk.
         If False, use an in-memory cookiejar instead.  Subclasses must
         implement this functionality.  Defaults to False.
@@ -109,9 +110,20 @@ class AbstractRpcServer(object):
     self.host_override = host_override
     self.auth_function = auth_function
     self.authenticated = False
-    self.extra_headers = extra_headers
+
+    self.extra_headers = {
+      "User-agent": GetUserAgent()
+    }
+    if extra_headers:
+      self.extra_headers.update(extra_headers)
+
     self.save_cookies = save_cookies
+    self.cookie_jar = cookielib.MozillaCookieJar()
     self.opener = self._GetOpener()
+    if self.host_override:
+      logging.info("Server: %s; Host: %s", self.host, self.host_override)
+    else:
+      logging.info("Server: %s", self.host)
 
   def _GetOpener(self):
     """Returns an OpenerDirector for making HTTP requests.
@@ -298,11 +310,14 @@ class AbstractRpcServer(object):
 class HttpRpcServer(AbstractRpcServer):
   """Provides a simplified RPC-style interface for HTTP requests."""
 
+  DEFAULT_COOKIE_FILE_PATH = "~/.appcfg_cookies"
+
   def _Authenticate(self):
     """Save the cookie jar after authentication."""
     super(HttpRpcServer, self)._Authenticate()
-    if self.save_cookies:
-      StatusUpdate("Saving authentication cookies to %s" % self.cookie_file)
+    if self.cookie_jar.filename is not None and self.save_cookies:
+      StatusUpdate("Saving authentication cookies to %s" %
+                   self.cookie_jar.filename)
       self.cookie_jar.save()
 
   def _GetOpener(self):
@@ -318,23 +333,29 @@ class HttpRpcServer(AbstractRpcServer):
     opener.add_handler(urllib2.HTTPDefaultErrorHandler())
     opener.add_handler(urllib2.HTTPSHandler())
     opener.add_handler(urllib2.HTTPErrorProcessor())
+
     if self.save_cookies:
-      self.cookie_file = os.path.expanduser("~/.appcfg_cookies")
-      self.cookie_jar = cookielib.MozillaCookieJar(self.cookie_file)
-      if os.path.exists(self.cookie_file):
+      self.cookie_jar.filename = os.path.expanduser(HttpRpcServer.DEFAULT_COOKIE_FILE_PATH)
+
+      if os.path.exists(self.cookie_jar.filename):
         try:
           self.cookie_jar.load()
           self.authenticated = True
           StatusUpdate("Loaded authentication cookies from %s" %
-                       self.cookie_file)
-        except cookielib.LoadError:
-          pass
+                       self.cookie_jar.filename)
+        except (OSError, IOError, cookielib.LoadError), e:
+          logging.debug("Could not load authentication cookies; %s: %s",
+                        e.__class__.__name__, e)
+          self.cookie_jar.filename = None
       else:
-        fd = os.open(self.cookie_file, os.O_CREAT, 0600)
-        os.close(fd)
-      os.chmod(self.cookie_file, 0600)
-    else:
-      self.cookie_jar = cookielib.CookieJar()
+        try:
+          fd = os.open(self.cookie_jar.filename, os.O_CREAT, 0600)
+          os.close(fd)
+        except (OSError, IOError), e:
+          logging.debug("Could not create authentication cookies file; %s: %s",
+                        e.__class__.__name__, e)
+          self.cookie_jar.filename = None
+
     opener.add_handler(urllib2.HTTPCookieProcessor(self.cookie_jar))
     return opener
 
@@ -419,6 +440,30 @@ class NagFile(validation.Validated):
     return yaml_object.BuildSingleObject(NagFile, nag_file)
 
 
+def GetVersionObject(isfile=os.path.isfile, open_fn=open):
+  """Gets the version of the SDK by parsing the VERSION file.
+
+  Args:
+    isfile, open_fn: Used for testing.
+
+  Returns:
+    A Yaml object or None if the VERSION file does not exist.
+  """
+  version_filename = os.path.join(os.path.dirname(google.__file__),
+                                  VERSION_FILE)
+  if not isfile(version_filename):
+    logging.error("Could not find version file at %s", version_filename)
+    return None
+
+  version_fh = open_fn(version_filename, "r")
+  try:
+    version = yaml.safe_load(version_fh)
+  finally:
+    version_fh.close()
+
+  return version
+
+
 class UpdateCheck(object):
   """Determines if the local SDK is the latest version.
 
@@ -436,7 +481,12 @@ class UpdateCheck(object):
       the app is using.
   """
 
-  def __init__(self, server, config, isfile=os.path.isfile, open_fn=open):
+  def __init__(self,
+               server,
+               config,
+               isdir=os.path.isdir,
+               isfile=os.path.isfile,
+               open_fn=open):
     """Create a new UpdateCheck.
 
     Args:
@@ -445,17 +495,25 @@ class UpdateCheck(object):
         application.
 
     Args for testing:
+      isdir: Replacement for os.path.isdir.
       isfile: Replacement for os.path.isfile.
       open: Replacement for the open builtin.
     """
     self.server = server
     self.config = config
+    self.isdir = isdir
     self.isfile = isfile
     self.open = open_fn
 
   @staticmethod
   def MakeNagFilename():
     """Returns the filename for the nag file for this user."""
+    user_homedir = os.path.expanduser("~/")
+    if not os.path.isdir(user_homedir):
+      drive, tail = os.path.splitdrive(os.__file__)
+      if drive:
+        os.environ["HOMEDRIVE"] = drive
+
     return os.path.expanduser("~/" + NAG_FILE)
 
   def _ParseVersionFile(self):
@@ -464,18 +522,7 @@ class UpdateCheck(object):
     Returns:
       A Yaml object or None if the file does not exist.
     """
-    version_filename = os.path.join(os.path.dirname(google.__file__),
-                                    VERSION_FILE)
-    if not self.isfile(version_filename):
-      logging.error("Could not find version file at %s", version_filename)
-      return None
-
-    version_fh = self.open(version_filename, "r")
-    try:
-      version = yaml.safe_load(version_fh)
-    finally:
-      version_fh.close()
-    return version
+    return GetVersionObject(isfile=self.isfile, open_fn=self.open)
 
   def CheckSupportedVersion(self):
     """Determines if the app's api_version is supported by the SDK.
@@ -573,14 +620,21 @@ class UpdateCheck(object):
   def _WriteNagFile(self, nag):
     """Writes the NagFile to the user's nag file.
 
+    If the destination path does not exist, this method will log an error
+    and fail silently.
+
     Args:
       nag: The NagFile to write.
     """
-    fh = self.open(UpdateCheck.MakeNagFilename(), "w")
+    nagfilename = UpdateCheck.MakeNagFilename()
     try:
-      fh.write(nag.ToYAML())
-    finally:
-      fh.close()
+      fh = self.open(nagfilename, "w")
+      try:
+        fh.write(nag.ToYAML())
+      finally:
+        fh.close()
+    except (OSError, IOError), e:
+      logging.error("Could not write nag file to %s. Error: %s", nagfilename, e)
 
   def _Nag(self, msg, latest, version, force=False):
     """Prints a nag message and updates the nag file's timestamp.
@@ -616,6 +670,8 @@ class UpdateCheck(object):
     print "-----------"
     print "Your SDK:"
     print yaml.dump(version)
+    print "-----------"
+    print "Please visit http://code.google.com/appengine for the latest SDK"
     print "****************************************************************"
 
   def AllowedToCheckForUpdates(self, input_fn=raw_input):
@@ -1041,7 +1097,7 @@ class AppVersionUpload(object):
           StatusUpdate("Scanned %d files." % num_files)
     except KeyboardInterrupt:
       logging.info("User interrupted. Aborting.")
-      return
+      raise
     except EnvironmentError, e:
       logging.error("An error occurred processing file '%s': %s. Aborting.",
                     path, e)
@@ -1067,7 +1123,7 @@ class AppVersionUpload(object):
     except KeyboardInterrupt:
       logging.info("User interrupted. Aborting.")
       self.Rollback()
-      return
+      raise
     except:
       logging.error("An unexpected error occurred. Aborting.")
       self.Rollback()
@@ -1117,6 +1173,62 @@ def GetFileLength(fh):
   length = fh.tell()
   fh.seek(pos, 0)
   return length
+
+
+def GetPlatformToken(os_module=os, sys_module=sys, platform=sys.platform):
+  """Returns a 'User-agent' token for the host system platform.
+
+  Args:
+    os_module, sys_module, platform: Used for testing.
+
+  Returns:
+    String containing the platform token for the host system.
+  """
+  if hasattr(sys_module, "getwindowsversion"):
+    windows_version = sys_module.getwindowsversion()
+    version_info = ".".join(str(i) for i in windows_version[:4])
+    return platform + "/" + version_info
+  elif hasattr(os_module, "uname"):
+    uname = os_module.uname()
+    return "%s/%s" % (uname[0], uname[2])
+  else:
+    return "unknown"
+
+
+def GetUserAgent(get_version=GetVersionObject, get_platform=GetPlatformToken):
+  """Determines the value of the 'User-agent' header to use for HTTP requests.
+
+  If the 'APPCFG_SDK_NAME' environment variable is present, that will be
+  used as the first product token in the user-agent.
+
+  Args:
+    get_version, get_platform: Used for testing.
+
+  Returns:
+    String containing the 'user-agent' header value, which includes the SDK
+    version, the platform information, and the version of Python;
+    e.g., "appcfg_py/1.0.1 Darwin/9.2.0 Python/2.5.2".
+  """
+  product_tokens = []
+
+  sdk_name = os.environ.get("APPCFG_SDK_NAME")
+  if sdk_name:
+    product_tokens.append(sdk_name)
+  else:
+    version = get_version()
+    if version is None:
+      release = "unknown"
+    else:
+      release = version["release"]
+
+    product_tokens.append("appcfg_py/%s" % release)
+
+  product_tokens.append(get_platform())
+
+  python_version = ".".join(str(i) for i in sys.version_info)
+  product_tokens.append("Python/%s" % python_version)
+
+  return " ".join(product_tokens)
 
 
 class AppCfgApp(object):
@@ -1312,8 +1424,7 @@ class AppCfgApp(object):
           self.options.server,
           lambda: (email, "password"),
           host_override=self.options.host,
-          extra_headers={"Cookie":
-                         'dev_appserver_login="%s:False"' % email},
+          extra_headers={"Cookie": 'dev_appserver_login="%s:False"' % email},
           save_cookies=self.options.save_cookies)
       server.authenticated = True
       return server
@@ -1449,6 +1560,20 @@ class AppCfgApp(object):
                       default=False,
                       help="Force deletion without being prompted.")
 
+  def UpdateIndexes(self):
+    """Updates indexes."""
+    if len(self.args) != 1:
+      self.parser.error("Expected a single <directory> argument.")
+
+    basepath = self.args[0]
+    appyaml = self._ParseAppYaml(basepath)
+    rpc_server = self._GetRpcServer()
+
+    index_defs = self._ParseIndexYaml(basepath)
+    if index_defs:
+      index_upload = IndexDefinitionUpload(rpc_server, appyaml, index_defs)
+      index_upload.DoUpload()
+
   def Rollback(self):
     """Does a rollback of any existing transaction for this app version."""
     if len(self.args) != 1:
@@ -1500,6 +1625,13 @@ the app, and appcfg.py will create/update the app version referenced
 in the app.yaml file at the top level of that directory.  appcfg.py
 will follow symlinks and recursively upload all files to the server.
 Temporary or source control files (e.g. foo~, .svn/*) will be skipped."""),
+      "update_indexes": Action(
+        function=UpdateIndexes,
+        usage="%prog [options] update_indexes <directory>",
+        short_desc="Update application indexes.",
+        long_desc="""
+The 'update_indexes' command will add additional indexes which are not currently
+in production as well as restart any indexes that were not completed."""),
       "vacuum_indexes": Action(
         function=VacuumIndexes,
         usage="%prog [options] vacuum_indexes <directory>",
@@ -1525,7 +1657,11 @@ and you are sure that there is no such transaction."""),
 def main(argv):
   logging.basicConfig(format=("%(asctime)s %(levelname)s %(filename)s:"
                               "%(lineno)s %(message)s "))
-  AppCfgApp(argv).Run()
+  try:
+    AppCfgApp(argv).Run()
+  except KeyboardInterrupt:
+    StatusUpdate("Interrupted.")
+    sys.exit(1)
 
 
 if __name__ == "__main__":

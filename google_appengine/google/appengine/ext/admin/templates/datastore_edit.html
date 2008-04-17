@@ -114,7 +114,7 @@
             <span class="field_name">{{ field.0|escape }}</span>
             <span class="field_type">({{ field.1|escape }})</span>
           </td>
-          <td class="value"><div style="position: relative">{{ field.2 }}</div></td>
+          <td class="value"><div style="position: relative">{{ field.2|safe }}</div></td>
         </tr>
       {% endfor %}
       <tr>

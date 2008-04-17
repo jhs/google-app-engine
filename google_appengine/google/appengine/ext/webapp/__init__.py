@@ -123,12 +123,33 @@ class Request(webob.Request):
     Args:
       argument_name: the name of the query or POST argument
       default_value: the value to return if the given argument is not present
-      allow_multiple: return a list of values with the given name
+      allow_multiple: return a list of values with the given name (deprecated)
 
     Returns:
       If allow_multiple is False (which it is by default), we return the first
       value with the given name given in the request. If it is True, we always
       return an list.
+    """
+    param_value = self.get_all(argument_name)
+    if allow_multiple:
+      return param_value
+    else:
+      if len(param_value) > 0:
+        return param_value[0]
+      else:
+        return default_value
+
+  def get_all(self, argument_name):
+    """Returns a list of query or POST arguments with the given name.
+
+    We parse the query string and POST payload lazily, so this will be a
+    slower operation on the first call.
+
+    Args:
+      argument_name: the name of the query or POST argument
+
+    Returns:
+      A (possibly empty) list of values.
     """
     if self.charset:
       argument_name = argument_name.encode(self.charset)
@@ -142,13 +163,7 @@ class Request(webob.Request):
       if isinstance(param_value[i], cgi.FieldStorage):
         param_value[i] = param_value[i].value
 
-    if allow_multiple:
-      return param_value
-    else:
-      if len(param_value) > 0:
-        return param_value[0]
-      else:
-        return default_value
+    return param_value
 
   def arguments(self):
     """Returns a list of the arguments provided in the query and/or POST.

@@ -330,7 +330,7 @@ class Key(object):
                                      saxutils.escape(str(self)))
   ToXml = ToTagUri
 
-  def _entity_group(self):
+  def entity_group(self):
     """Returns this key's entity group as a Key.
 
     Note that the returned Key will be incomplete if this Key is for a root
@@ -601,6 +601,17 @@ class GeoPt(object):
       return lat_cmp
     else:
       return cmp(self.lon, other.lon)
+
+  def __hash__(self):
+    """Returns a 32-bit integer hash of this point.
+
+    Implements Python's hash protocol so that GeoPts may be used in sets and
+    as dictionary keys.
+
+    Returns:
+      int
+    """
+    return hash((self.lat, self.lon))
 
   def __repr__(self):
     """Returns an eval()able string representation of this GeoPt.
@@ -1153,7 +1164,7 @@ def FromPropertyTypeName(type_name):
   return _PROPERTY_TYPE_STRINGS[type_name]
 
 
-def PropertyValueFromString(type_, value_string):
+def PropertyValueFromString(type_, value_string, _auth_domain=None):
   """Returns an instance of a property value given a type and string value.
 
   The reverse of this method is just str() and type() of the python value.
@@ -1192,6 +1203,8 @@ def PropertyValueFromString(type_, value_string):
     return Rating(int(value_string))
   elif type_ == bool:
     return value_string == 'True'
+  elif type_ == users.User:
+    return users.User(value_string, _auth_domain)
   elif type_ == type(None):
     return None
   return type_(value_string)

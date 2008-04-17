@@ -147,7 +147,7 @@ class Loader(object):
 
   If you need to run extra code to convert entities from CSV, create new
   properties, or otherwise modify the entities before they're inserted,
-  override AddEntity.
+  override HandleEntity.
   """
 
   __loaders = {}

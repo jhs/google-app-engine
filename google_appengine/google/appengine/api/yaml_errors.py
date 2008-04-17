@@ -38,6 +38,10 @@ class UnexpectedAttribute(Error):
   """Raised when an unexpected attribute is encounted."""
 
 
+class DuplicateAttribute(Error):
+  """Generated when an attribute is assigned to twice."""
+
+
 class ListenerConfigurationError(Error):
   """Generated when there is a parsing problem due to configuration."""
 
