@@ -71,6 +71,7 @@ import tempfile
 
 from google.appengine.api import yaml_errors
 from google.appengine.tools import appcfg
+from google.appengine.tools import appengine_rpc
 from google.appengine.tools import dev_appserver
 
 
@@ -271,9 +272,11 @@ def MakeRpcServer(option_dict):
   Returns:
     A HttpRpcServer.
   """
-  server = appcfg.HttpRpcServer(
+  server = appengine_rpc.HttpRpcServer(
       option_dict[ARG_ADMIN_CONSOLE_SERVER],
       lambda: ('unused_email', 'unused_password'),
+      appcfg.GetUserAgent(),
+      appcfg.GetSourceName(),
       host_override=option_dict[ARG_ADMIN_CONSOLE_HOST])
   server.authenticated = True
   return server

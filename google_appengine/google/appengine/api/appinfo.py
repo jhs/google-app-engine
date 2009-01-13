@@ -54,6 +54,8 @@ MAX_URL_MAPS = 100
 APPLICATION_RE_STRING = r'(?!-)[a-z\d\-]{1,%d}' % APP_ID_MAX_LEN
 VERSION_RE_STRING = r'(?!-)[a-z\d\-]{1,%d}' % MAJOR_VERSION_ID_MAX_LEN
 
+RUNTIME_RE_STRING = r'[a-z]{1,30}'
+
 HANDLER_STATIC_FILES = 'static_files'
 HANDLER_STATIC_DIR = 'static_dir'
 HANDLER_SCRIPT = 'script'
@@ -65,8 +67,6 @@ LOGIN_ADMIN = 'admin'
 SECURE_HTTP = 'never'
 SECURE_HTTPS = 'always'
 SECURE_HTTP_OR_HTTPS = 'optional'
-
-RUNTIME_PYTHON = 'python'
 
 DEFAULT_SKIP_FILES = (r"^(.*/)?("
                       r"(app\.yaml)|"
@@ -304,7 +304,7 @@ class AppInfoExternal(validation.Validated):
 
     APPLICATION: APPLICATION_RE_STRING,
     VERSION: VERSION_RE_STRING,
-    RUNTIME: validation.Options(RUNTIME_PYTHON),
+    RUNTIME: RUNTIME_RE_STRING,
 
 
     API_VERSION: validation.Options('1', 'beta'),

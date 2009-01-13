@@ -86,12 +86,6 @@ class PropertyValue_ReferenceValuePathElement(ProtocolBuffer.ProtocolMessage):
     if self.has_name_ and self.name_ != x.name_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_type_):
@@ -192,12 +186,6 @@ class PropertyValue_PointValue(ProtocolBuffer.ProtocolMessage):
     if self.has_y_ != x.has_y_: return 0
     if self.has_y_ and self.y_ != x.y_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -326,12 +314,6 @@ class PropertyValue_UserValue(ProtocolBuffer.ProtocolMessage):
     if self.has_gaiaid_ and self.gaiaid_ != x.gaiaid_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_email_):
@@ -451,12 +433,6 @@ class PropertyValue_ReferenceValue(ProtocolBuffer.ProtocolMessage):
     for e1, e2 in zip(self.pathelement_, x.pathelement_):
       if e1 != e2: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -662,12 +638,6 @@ class PropertyValue(ProtocolBuffer.ProtocolMessage):
     if self.has_referencevalue_ and self.referencevalue_ != x.referencevalue_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (self.has_pointvalue_ and not self.pointvalue_.IsInitialized(debug_strs)): initialized = 0
@@ -856,6 +826,7 @@ class Property(ProtocolBuffer.ProtocolMessage):
 
   BLOB         =   14
   TEXT         =   15
+  BYTESTRING   =   16
   ATOM_CATEGORY =    1
   ATOM_LINK    =    2
   ATOM_TITLE   =    3
@@ -873,6 +844,7 @@ class Property(ProtocolBuffer.ProtocolMessage):
   _Meaning_NAMES = {
     14: "BLOB",
     15: "TEXT",
+    16: "BYTESTRING",
     1: "ATOM_CATEGORY",
     2: "ATOM_LINK",
     3: "ATOM_TITLE",
@@ -983,12 +955,6 @@ class Property(ProtocolBuffer.ProtocolMessage):
     if self.has_multiple_ != x.has_multiple_: return 0
     if self.has_multiple_ and self.multiple_ != x.multiple_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -1167,12 +1133,6 @@ class Path_Element(ProtocolBuffer.ProtocolMessage):
     if self.has_name_ and self.name_ != x.name_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_type_):
@@ -1260,12 +1220,6 @@ class Path(ProtocolBuffer.ProtocolMessage):
     for e1, e2 in zip(self.element_, x.element_):
       if e1 != e2: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -1379,12 +1333,6 @@ class Reference(ProtocolBuffer.ProtocolMessage):
     if self.has_path_ != x.has_path_: return 0
     if self.has_path_ and self.path_ != x.path_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -1576,12 +1524,6 @@ class User(ProtocolBuffer.ProtocolMessage):
     if self.has_gaiaid_ != x.has_gaiaid_: return 0
     if self.has_gaiaid_ and self.gaiaid_ != x.gaiaid_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -1829,12 +1771,6 @@ class EntityProto(ProtocolBuffer.ProtocolMessage):
     for e1, e2 in zip(self.raw_property_, x.raw_property_):
       if e1 != e2: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -2099,12 +2035,6 @@ class CompositeProperty(ProtocolBuffer.ProtocolMessage):
       if e1 != e2: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_index_id_):
@@ -2233,12 +2163,6 @@ class Index_Property(ProtocolBuffer.ProtocolMessage):
     if self.has_direction_ and self.direction_ != x.direction_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_name_):
@@ -2351,12 +2275,6 @@ class Index(ProtocolBuffer.ProtocolMessage):
     for e1, e2 in zip(self.property_, x.property_):
       if e1 != e2: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -2547,12 +2465,6 @@ class CompositeIndex(ProtocolBuffer.ProtocolMessage):
     if self.has_state_ != x.has_state_: return 0
     if self.has_state_ and self.state_ != x.state_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1

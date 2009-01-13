@@ -117,7 +117,7 @@ PostalAddress = datastore_types.PostalAddress
 Rating = datastore_types.Rating
 Text = datastore_types.Text
 Blob = datastore_types.Blob
-
+ByteString = datastore_types.ByteString
 
 _kind_map = {}
 
@@ -171,6 +171,7 @@ _ALLOWED_PROPERTY_TYPES = set([
     datetime.date,
     datetime.time,
     Blob,
+    ByteString,
     Text,
     users.User,
     Category,
@@ -1554,8 +1555,8 @@ class Query(_BaseQuery):
   def order(self, property):
     """Set order of query result.
 
-    To use descending order, prepend '-' (minus) to the property name, e.g.,
-    '-date' rather than 'date'.
+    To use descending order, prepend '-' (minus) to the property
+    name, e.g., '-date' rather than 'date'.
 
     Args:
       property: Property to sort on.
@@ -1573,7 +1574,8 @@ class Query(_BaseQuery):
       order = datastore.Query.ASCENDING
 
     if not issubclass(self._model_class, Expando):
-      if property not in self._model_class.properties():
+      if (property not in self._model_class.properties() and
+          property not in datastore_types._SPECIAL_PROPERTIES):
         raise PropertyError('Invalid property name \'%s\'' % property)
 
     self.__orderings.append((property, order))
@@ -1827,6 +1829,37 @@ class BlobProperty(Property):
     return value
 
   data_type = Blob
+
+
+class ByteStringProperty(Property):
+  """A short (<=500 bytes) byte string.
+
+  This type should be used for short binary values that need to be indexed. If
+  you do not require indexing (regardless of length), use BlobProperty instead.
+  """
+
+  def validate(self, value):
+    """Validate ByteString property.
+
+    Returns:
+      A valid value.
+
+    Raises:
+      BadValueError if property is not instance of 'ByteString'.
+    """
+    if value is not None and not isinstance(value, ByteString):
+      try:
+        value = ByteString(value)
+      except TypeError, err:
+        raise BadValueError('Property %s must be convertible '
+                            'to a ByteString instance (%s)' % (self.name, err))
+    value = super(ByteStringProperty, self).validate(value)
+    if value is not None and not isinstance(value, ByteString):
+      raise BadValueError('Property %s must be a ByteString instance'
+                          % self.name)
+    return value
+
+  data_type = ByteString
 
 
 class DateTimeProperty(Property):
@@ -2149,24 +2182,31 @@ class UserProperty(Property):
   """A user property."""
 
   def __init__(self, verbose_name=None, name=None,
-               required=False, validator=None, choices=None):
+               required=False, validator=None, choices=None,
+               auto_current_user=False, auto_current_user_add=False):
     """Initializes this Property with the given options.
 
-    Do not assign user properties a default value.
+    Note: this does *not* support the 'default' keyword argument.
+    Use auto_current_user_add=True instead.
 
     Args:
       verbose_name: User friendly name of property.
       name: Storage name for property.  By default, uses attribute name
         as it is assigned in the Model sub-class.
-      default: Default value for property if none is assigned.
       required: Whether property is required.
       validator: User provided method used for validation.
       choices: User provided set of valid property values.
+      auto_current_user: If true, the value is set to the current user
+        each time the entity is written to the datastore.
+      auto_current_user_add: If true, the value is set to the current user
+        the first time the entity is written to the datastore.
     """
     super(UserProperty, self).__init__(verbose_name, name,
                                        required=required,
                                        validator=validator,
                                        choices=choices)
+    self.auto_current_user = auto_current_user
+    self.auto_current_user_add = auto_current_user_add
 
   def validate(self, value):
     """Validate user.
@@ -2181,6 +2221,30 @@ class UserProperty(Property):
     if value is not None and not isinstance(value, users.User):
       raise BadValueError('Property %s must be a User' % self.name)
     return value
+
+  def default_value(self):
+    """Default value for user.
+
+    Returns:
+      Value of users.get_current_user() if auto_current_user or
+      auto_current_user_add is set; else None. (But *not* the default
+      implementation, since we don't support the 'default' keyword
+      argument.)
+    """
+    if self.auto_current_user or self.auto_current_user_add:
+      return users.get_current_user()
+    return None
+
+  def get_value_for_datastore(self, model_instance):
+    """Get value from property to send to datastore.
+
+    Returns:
+      Value of users.get_current_user() if auto_current_user is set;
+      else the default implementation.
+    """
+    if self.auto_current_user:
+      return users.get_current_user()
+    return super(UserProperty, self).get_value_for_datastore(model_instance)
 
   data_type = users.User
 

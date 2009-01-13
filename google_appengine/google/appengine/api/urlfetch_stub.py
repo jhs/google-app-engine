@@ -51,6 +51,7 @@ _API_CALL_DEADLINE = 5.0
 
 
 _UNTRUSTED_REQUEST_HEADERS = frozenset([
+  'accept-encoding',
   'content-length',
   'host',
   'referer',
@@ -80,7 +81,7 @@ class URLFetchServiceStub(apiproxy_stub.APIProxyStub):
     """
     (protocol, host, path, parameters, query, fragment) = urlparse.urlparse(request.url())
 
-    payload = ''
+    payload = None
     if request.method() == urlfetch_service_pb.URLFetchRequest.GET:
       method = 'GET'
     elif request.method() == urlfetch_service_pb.URLFetchRequest.POST:
@@ -118,7 +119,7 @@ class URLFetchServiceStub(apiproxy_stub.APIProxyStub):
 
     Args:
       url: String containing the URL to access.
-      payload: Request payload to send, if any.
+      payload: Request payload to send, if any; None if no payload.
       method: HTTP method to use (e.g., 'GET')
       headers: List of additional header objects to use for the request.
       response: Response object
@@ -150,10 +151,11 @@ class URLFetchServiceStub(apiproxy_stub.APIProxyStub):
         protocol = last_protocol
 
       adjusted_headers = {
-        'Content-Length': len(payload),
         'Host': host,
         'Accept': '*/*',
       }
+      if payload is not None:
+        adjusted_headers['Content-Length'] = len(payload)
       if method == 'POST' and payload:
         adjusted_headers['Content-Type'] = 'application/x-www-form-urlencoded'
 

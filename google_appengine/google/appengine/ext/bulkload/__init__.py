@@ -401,6 +401,7 @@ class BulkLoad(webapp.RequestHandler):
         response code: integer HTTP response code to return
         output: string containing the HTTP response body
     """
+    data = data.encode('utf-8')
     Validate(kind, basestring)
     Validate(data, basestring)
     output = []

@@ -29,7 +29,7 @@ files, and commit or rollback the transaction.
 """
 
 
-import cookielib
+import calendar
 import datetime
 import getpass
 import logging
@@ -38,20 +38,21 @@ import optparse
 import os
 import re
 import sha
-import socket
 import sys
 import tempfile
 import time
-import urllib
 import urllib2
 
 import google
+import yaml
+from google.appengine.cron import groctimespecification
 from google.appengine.api import appinfo
+from google.appengine.api import croninfo
 from google.appengine.api import validation
 from google.appengine.api import yaml_errors
 from google.appengine.api import yaml_object
 from google.appengine.datastore import datastore_index
-import yaml
+from google.appengine.tools import appengine_rpc
 
 
 MAX_FILES_TO_CLONE = 100
@@ -69,6 +70,9 @@ MAX_LOG_LEVEL = 4
 verbosity = 1
 
 
+appinfo.AppInfoExternal.ATTRIBUTES[appinfo.RUNTIME] = "python"
+
+
 def StatusUpdate(msg):
   """Print a status message to stderr.
 
@@ -79,289 +83,6 @@ def StatusUpdate(msg):
   """
   if verbosity > 0:
     print >>sys.stderr, msg
-
-
-class ClientLoginError(urllib2.HTTPError):
-  """Raised to indicate there was an error authenticating with ClientLogin."""
-
-  def __init__(self, url, code, msg, headers, args):
-    urllib2.HTTPError.__init__(self, url, code, msg, headers, None)
-    self.args = args
-    self.reason = args["Error"]
-
-
-class AbstractRpcServer(object):
-  """Provides a common interface for a simple RPC server."""
-
-  def __init__(self, host, auth_function, host_override=None,
-               extra_headers=None, save_cookies=False):
-    """Creates a new HttpRpcServer.
-
-    Args:
-      host: The host to send requests to.
-      auth_function: A function that takes no arguments and returns an
-        (email, password) tuple when called. Will be called if authentication
-        is required.
-      host_override: The host header to send to the server (defaults to host).
-      extra_headers: A dict of extra headers to append to every request. Values
-        supplied here will override other default headers that are supplied.
-      save_cookies: If True, save the authentication cookies to local disk.
-        If False, use an in-memory cookiejar instead.  Subclasses must
-        implement this functionality.  Defaults to False.
-    """
-    self.host = host
-    self.host_override = host_override
-    self.auth_function = auth_function
-    self.authenticated = False
-
-    self.extra_headers = {
-      "User-agent": GetUserAgent()
-    }
-    if extra_headers:
-      self.extra_headers.update(extra_headers)
-
-    self.save_cookies = save_cookies
-    self.cookie_jar = cookielib.MozillaCookieJar()
-    self.opener = self._GetOpener()
-    if self.host_override:
-      logging.info("Server: %s; Host: %s", self.host, self.host_override)
-    else:
-      logging.info("Server: %s", self.host)
-
-  def _GetOpener(self):
-    """Returns an OpenerDirector for making HTTP requests.
-
-    Returns:
-      A urllib2.OpenerDirector object.
-    """
-    raise NotImplemented()
-
-  def _CreateRequest(self, url, data=None):
-    """Creates a new urllib request."""
-    logging.debug("Creating request for: '%s' with payload:\n%s", url, data)
-    req = urllib2.Request(url, data=data)
-    if self.host_override:
-      req.add_header("Host", self.host_override)
-    for key, value in self.extra_headers.iteritems():
-      req.add_header(key, value)
-    return req
-
-  def _GetAuthToken(self, email, password):
-    """Uses ClientLogin to authenticate the user, returning an auth token.
-
-    Args:
-      email:    The user's email address
-      password: The user's password
-
-    Raises:
-      ClientLoginError: If there was an error authenticating with ClientLogin.
-      HTTPError: If there was some other form of HTTP error.
-
-    Returns:
-      The authentication token returned by ClientLogin.
-    """
-    req = self._CreateRequest(
-        url="https://www.google.com/accounts/ClientLogin",
-        data=urllib.urlencode({
-            "Email": email,
-            "Passwd": password,
-            "service": "ah",
-            "source": "Google-appcfg-1.0",
-            "accountType": "HOSTED_OR_GOOGLE"
-        })
-    )
-    try:
-      response = self.opener.open(req)
-      response_body = response.read()
-      response_dict = dict(x.split("=")
-                           for x in response_body.split("\n") if x)
-      return response_dict["Auth"]
-    except urllib2.HTTPError, e:
-      if e.code == 403:
-        body = e.read()
-        response_dict = dict(x.split("=", 1) for x in body.split("\n") if x)
-        raise ClientLoginError(req.get_full_url(), e.code, e.msg,
-                               e.headers, response_dict)
-      else:
-        raise
-
-  def _GetAuthCookie(self, auth_token):
-    """Fetches authentication cookies for an authentication token.
-
-    Args:
-      auth_token: The authentication token returned by ClientLogin.
-
-    Raises:
-      HTTPError: If there was an error fetching the authentication cookies.
-    """
-    continue_location = "http://localhost/"
-    args = {"continue": continue_location, "auth": auth_token}
-    login_path = os.environ.get("APPCFG_LOGIN_PATH", "/_ah")
-    req = self._CreateRequest("http://%s%s/login?%s" %
-                              (self.host, login_path, urllib.urlencode(args)))
-    try:
-      response = self.opener.open(req)
-    except urllib2.HTTPError, e:
-      response = e
-    if (response.code != 302 or
-        response.info()["location"] != continue_location):
-      raise urllib2.HTTPError(req.get_full_url(), response.code, response.msg,
-                              response.headers, response.fp)
-    self.authenticated = True
-
-  def _Authenticate(self):
-    """Authenticates the user.
-
-    The authentication process works as follows:
-     1) We get a username and password from the user
-     2) We use ClientLogin to obtain an AUTH token for the user
-        (see http://code.google.com/apis/accounts/AuthForInstalledApps.html).
-     3) We pass the auth token to /_ah/login on the server to obtain an
-        authentication cookie. If login was successful, it tries to redirect
-        us to the URL we provided.
-
-    If we attempt to access the upload API without first obtaining an
-    authentication cookie, it returns a 401 response and directs us to
-    authenticate ourselves with ClientLogin.
-    """
-    for i in range(3):
-      credentials = self.auth_function()
-      try:
-        auth_token = self._GetAuthToken(credentials[0], credentials[1])
-      except ClientLoginError, e:
-        if e.reason == "BadAuthentication":
-          print >>sys.stderr, "Invalid username or password."
-          continue
-        if e.reason == "CaptchaRequired":
-          print >>sys.stderr, (
-              "Please go to\n"
-              "https://www.google.com/accounts/DisplayUnlockCaptcha\n"
-              "and verify you are a human.  Then try again.")
-          break;
-        if e.reason == "NotVerified":
-          print >>sys.stderr, "Account not verified."
-          break
-        if e.reason == "TermsNotAgreed":
-          print >>sys.stderr, "User has not agreed to TOS."
-          break
-        if e.reason == "AccountDeleted":
-          print >>sys.stderr, "The user account has been deleted."
-          break
-        if e.reason == "AccountDisabled":
-          print >>sys.stderr, "The user account has been disabled."
-          break
-        if e.reason == "ServiceDisabled":
-          print >>sys.stderr, ("The user's access to the service has been "
-                               "disabled.")
-          break
-        if e.reason == "ServiceUnavailable":
-          print >>sys.stderr, "The service is not available; try again later."
-          break
-        raise
-      self._GetAuthCookie(auth_token)
-      return
-
-  def Send(self, request_path, payload="",
-           content_type="application/octet-stream",
-           timeout=None,
-           **kwargs):
-    """Sends an RPC and returns the response.
-
-    Args:
-      request_path: The path to send the request to, eg /api/appversion/create.
-      payload: The body of the request, or None to send an empty request.
-      content_type: The Content-Type header to use.
-      timeout: timeout in seconds; default None i.e. no timeout.
-        (Note: for large requests on OS X, the timeout doesn't work right.)
-      kwargs: Any keyword arguments are converted into query string parameters.
-
-    Returns:
-      The response body, as a string.
-    """
-    if not self.authenticated:
-      self._Authenticate()
-
-    old_timeout = socket.getdefaulttimeout()
-    socket.setdefaulttimeout(timeout)
-    try:
-      tries = 0
-      while True:
-        tries += 1
-        args = dict(kwargs)
-        url = "http://%s%s?%s" % (self.host, request_path,
-                                  urllib.urlencode(args))
-        req = self._CreateRequest(url=url, data=payload)
-        req.add_header("Content-Type", content_type)
-        req.add_header("X-appcfg-api-version", "1")
-        try:
-          f = self.opener.open(req)
-          response = f.read()
-          f.close()
-          return response
-        except urllib2.HTTPError, e:
-          if tries > 3:
-            raise
-          elif e.code == 401:
-            self._Authenticate()
-          elif e.code >= 500 and e.code < 600:
-            continue
-          else:
-            raise
-    finally:
-      socket.setdefaulttimeout(old_timeout)
-
-
-class HttpRpcServer(AbstractRpcServer):
-  """Provides a simplified RPC-style interface for HTTP requests."""
-
-  DEFAULT_COOKIE_FILE_PATH = "~/.appcfg_cookies"
-
-  def _Authenticate(self):
-    """Save the cookie jar after authentication."""
-    super(HttpRpcServer, self)._Authenticate()
-    if self.cookie_jar.filename is not None and self.save_cookies:
-      StatusUpdate("Saving authentication cookies to %s" %
-                   self.cookie_jar.filename)
-      self.cookie_jar.save()
-
-  def _GetOpener(self):
-    """Returns an OpenerDirector that supports cookies and ignores redirects.
-
-    Returns:
-      A urllib2.OpenerDirector object.
-    """
-    opener = urllib2.OpenerDirector()
-    opener.add_handler(urllib2.ProxyHandler())
-    opener.add_handler(urllib2.UnknownHandler())
-    opener.add_handler(urllib2.HTTPHandler())
-    opener.add_handler(urllib2.HTTPDefaultErrorHandler())
-    opener.add_handler(urllib2.HTTPSHandler())
-    opener.add_handler(urllib2.HTTPErrorProcessor())
-
-    if self.save_cookies:
-      self.cookie_jar.filename = os.path.expanduser(HttpRpcServer.DEFAULT_COOKIE_FILE_PATH)
-
-      if os.path.exists(self.cookie_jar.filename):
-        try:
-          self.cookie_jar.load()
-          self.authenticated = True
-          StatusUpdate("Loaded authentication cookies from %s" %
-                       self.cookie_jar.filename)
-        except (OSError, IOError, cookielib.LoadError), e:
-          logging.debug("Could not load authentication cookies; %s: %s",
-                        e.__class__.__name__, e)
-          self.cookie_jar.filename = None
-      else:
-        try:
-          fd = os.open(self.cookie_jar.filename, os.O_CREAT, 0600)
-          os.close(fd)
-        except (OSError, IOError), e:
-          logging.debug("Could not create authentication cookies file; %s: %s",
-                        e.__class__.__name__, e)
-          self.cookie_jar.filename = None
-
-    opener.add_handler(urllib2.HTTPCookieProcessor(self.cookie_jar))
-    return opener
 
 
 def GetMimeTypeIfStaticFile(config, filename):
@@ -427,8 +148,8 @@ class NagFile(validation.Validated):
   """
 
   ATTRIBUTES = {
-    "timestamp": validation.TYPE_FLOAT,
-    "opt_in": validation.Optional(validation.TYPE_BOOL),
+      "timestamp": validation.TYPE_FLOAT,
+      "opt_in": validation.Optional(validation.TYPE_BOOL),
   }
 
   @staticmethod
@@ -448,7 +169,8 @@ def GetVersionObject(isfile=os.path.isfile, open_fn=open):
   """Gets the version of the SDK by parsing the VERSION file.
 
   Args:
-    isfile, open_fn: Used for testing.
+    isfile: used for testing.
+    open_fn: Used for testing.
 
   Returns:
     A Yaml object or None if the VERSION file does not exist.
@@ -497,11 +219,9 @@ class UpdateCheck(object):
       server: The AbstractRpcServer to use.
       config: The yaml object that specifies the configuration of this
         application.
-
-    Args for testing:
-      isdir: Replacement for os.path.isdir.
-      isfile: Replacement for os.path.isfile.
-      open: Replacement for the open builtin.
+      isdir: Replacement for os.path.isdir (for testing).
+      isfile: Replacement for os.path.isfile (for testing).
+      open_fn: Replacement for the open builtin (for testing).
     """
     self.server = server
     self.config = config
@@ -514,7 +234,7 @@ class UpdateCheck(object):
     """Returns the filename for the nag file for this user."""
     user_homedir = os.path.expanduser("~/")
     if not os.path.isdir(user_homedir):
-      drive, tail = os.path.splitdrive(os.__file__)
+      drive, unused_tail = os.path.splitdrive(os.__file__)
       if drive:
         os.environ["HOMEDRIVE"] = drive
 
@@ -690,6 +410,9 @@ class UpdateCheck(object):
     save the response in the nag file.  Subsequent calls to this function
     will re-use that response.
 
+    Args:
+      input_fn: used to collect user input. This is for testing only.
+
     Returns:
       True if the user wants to check for updates.  False otherwise.
     """
@@ -731,11 +454,37 @@ class IndexDefinitionUpload(object):
     self.definitions = definitions
 
   def DoUpload(self):
+    """Uploads the index definitions."""
     StatusUpdate("Uploading index definitions.")
     self.server.Send("/api/datastore/index/add",
                      app_id=self.config.application,
                      version=self.config.version,
                      payload=self.definitions.ToYAML())
+
+
+class CronEntryUpload(object):
+  """Provides facilities to upload cron entries to the hosting service."""
+
+  def __init__(self, server, config, cron):
+    """Creates a new CronEntryUpload.
+
+    Args:
+      server: The RPC server to use.  Should be an instance of a subclass of
+      AbstractRpcServer
+      config: The AppInfoExternal object derived from the app.yaml file.
+      cron: The CronInfoExternal object loaded from the cron.yaml file.
+    """
+    self.server = server
+    self.config = config
+    self.cron = cron
+
+  def DoUpload(self):
+    """Uploads the cron entries."""
+    StatusUpdate("Uploading cron entries.")
+    self.server.Send("/api/datastore/cron/update",
+                     app_id=self.config.application,
+                     version=self.config.version,
+                     payload=self.cron.ToYAML())
 
 
 class IndexOperation(object):
@@ -840,11 +589,11 @@ class VacuumIndexesOperation(IndexOperation):
           "Are you sure you want to delete this index? (N/y/a): ")
       confirmation = confirmation.strip().lower()
 
-      if confirmation == 'y':
+      if confirmation == "y":
         return True
-      elif confirmation == 'n' or confirmation == '':
+      elif confirmation == "n" or not confirmation:
         return False
-      elif confirmation == 'a':
+      elif confirmation == "a":
         self.force = True
         return True
       else:
@@ -868,28 +617,28 @@ class VacuumIndexesOperation(IndexOperation):
       definitions: datastore_index.IndexDefinitions as loaded from users
         index.yaml file.
     """
-    new_indexes, unused_indexes = self.DoDiff(definitions)
+    unused_new_indexes, notused_indexes = self.DoDiff(definitions)
 
     deletions = datastore_index.IndexDefinitions(indexes=[])
-    if unused_indexes.indexes is not None:
-      for index in unused_indexes.indexes:
+    if notused_indexes.indexes is not None:
+      for index in notused_indexes.indexes:
         if self.force or self.GetConfirmation(index):
           deletions.indexes.append(index)
 
-    if len(deletions.indexes) > 0:
+    if deletions.indexes:
       not_deleted = self.DoDelete(deletions)
 
       if not_deleted.indexes:
         not_deleted_count = len(not_deleted.indexes)
         if not_deleted_count == 1:
-          warning_message = ('An index was not deleted.  Most likely this is '
-                             'because it no longer exists.\n\n')
+          warning_message = ("An index was not deleted.  Most likely this is "
+                             "because it no longer exists.\n\n")
         else:
-          warning_message = ('%d indexes were not deleted.  Most likely this '
-                             'is because they no longer exist.\n\n'
+          warning_message = ("%d indexes were not deleted.  Most likely this "
+                             "is because they no longer exist.\n\n"
                              % not_deleted_count)
         for index in not_deleted.indexes:
-          warning_message = warning_message + index.ToYAML()
+          warning_message += index.ToYAML()
         logging.warning(warning_message)
 
 
@@ -925,6 +674,7 @@ class LogsRequester(object):
     self.valid_dates = None
     if self.num_days:
       patterns = []
+      now = PacificTime(now)
       for i in xrange(self.num_days):
         then = time.gmtime(now - 24*3600 * i)
         patterns.append(re.escape(time.strftime("%d/%m/%Y", then)))
@@ -984,25 +734,25 @@ class LogsRequester(object):
       request should be issued; or None, if not.
     """
     logging.info("Request with offset %r.", offset)
-    kwds = {'app_id': self.config.application,
-            'version': self.version_id,
-            'limit': 100,
-            }
+    kwds = {"app_id": self.config.application,
+            "version": self.version_id,
+            "limit": 100,
+           }
     if offset:
-      kwds['offset'] = offset
+      kwds["offset"] = offset
     if self.severity is not None:
-      kwds['severity'] = str(self.severity)
+      kwds["severity"] = str(self.severity)
     response = self.server.Send("/api/request_logs", payload=None, **kwds)
     response = response.replace("\r", "\0")
     lines = response.splitlines()
     logging.info("Received %d bytes, %d records.", len(response), len(lines))
     offset = None
-    if lines and lines[0].startswith('#'):
-      match = re.match(r'^#\s*next_offset=(\S+)\s*$', lines[0])
+    if lines and lines[0].startswith("#"):
+      match = re.match(r"^#\s*next_offset=(\S+)\s*$", lines[0])
       del lines[0]
       if match:
         offset = match.group(1)
-    if lines and lines[-1].startswith('#'):
+    if lines and lines[-1].startswith("#"):
       del lines[-1]
     valid_dates = self.valid_dates
     sentinel = self.sentinel
@@ -1015,13 +765,67 @@ class LogsRequester(object):
            line[len_sentinel : len_sentinel+1] in ("", "\0")) or
           (valid_dates and not valid_dates.match(line))):
         return None
-      tf.write(line + '\n')
+      tf.write(line + "\n")
     if not lines:
       return None
     return offset
 
 
-def CopyReversedLines(input, output, blocksize=2**16):
+def PacificTime(now):
+  """Helper to return the number of seconds between UTC and Pacific time.
+
+  This is needed to compute today's date in Pacific time (more
+  specifically: Mountain View local time), which is how request logs
+  are reported.  (Google servers always report times in Mountain View
+  local time, regardless of where they are physically located.)
+
+  This takes (post-2006) US DST into account.  Pacific time is either
+  8 hours or 7 hours west of UTC, depending on whether DST is in
+  effect.  Since 2007, US DST starts on the Second Sunday in March
+  March, and ends on the first Sunday in November.  (Reference:
+  http://aa.usno.navy.mil/faq/docs/daylight_time.php.)
+
+  Note that the server doesn't report its local time (the HTTP Date
+  header uses UTC), and the client's local time is irrelevant.
+
+  Args:
+    A posix timestamp giving current UTC time.
+
+  Returns:
+    A pseudo-posix timestamp giving current Pacific time.  Passing
+    this through time.gmtime() will produce a tuple in Pacific local
+    time.
+  """
+  now -= 8*3600
+  if IsPacificDST(now):
+    now += 3600
+  return now
+
+
+def IsPacificDST(now):
+  """Helper for PacificTime to decide whether now is Pacific DST (PDT).
+
+  Args:
+    now: A pseudo-posix timestamp giving current time in PST.
+
+  Returns:
+    True if now falls within the range of DST, False otherwise.
+  """
+  DAY = 24*3600
+  SUNDAY = 6
+  pst = time.gmtime(now)
+  year = pst[0]
+  assert year >= 2007
+  begin = calendar.timegm((year, 3, 8, 2, 0, 0, 0, 0, 0))
+  while time.gmtime(begin).tm_wday != SUNDAY:
+    begin += DAY
+  end = calendar.timegm((year, 11, 1, 2, 0, 0, 0, 0, 0))
+  while time.gmtime(end).tm_wday != SUNDAY:
+    end += DAY
+  return begin <= now < end
+
+
+def CopyReversedLines(instream, outstream, blocksize=2**16):
   r"""Copy lines from input stream to output stream in reverse order.
 
   As a special feature, null bytes in the input are turned into
@@ -1030,20 +834,20 @@ def CopyReversedLines(input, output, blocksize=2**16):
   "A\0B\nC\0D\n", the output is "C\n\tD\nA\n\tB\n".
 
   Args:
-    input: A seekable stream open for reading in binary mode.
-    output: A stream open for writing; doesn't have to be seekable or binary.
+    instream: A seekable stream open for reading in binary mode.
+    outstream: A stream open for writing; doesn't have to be seekable or binary.
     blocksize: Optional block size for buffering, for unit testing.
 
   Returns:
     The number of lines copied.
   """
   line_count = 0
-  input.seek(0, 2)
-  last_block = input.tell() // blocksize
+  instream.seek(0, 2)
+  last_block = instream.tell() // blocksize
   spillover = ""
   for iblock in xrange(last_block + 1, -1, -1):
-    input.seek(iblock * blocksize)
-    data = input.read(blocksize)
+    instream.seek(iblock * blocksize)
+    data = instream.read(blocksize)
     lines = data.splitlines(True)
     lines[-1:] = "".join(lines[-1:] + [spillover]).splitlines(True)
     if lines and not lines[-1].endswith("\n"):
@@ -1054,7 +858,7 @@ def CopyReversedLines(input, output, blocksize=2**16):
     if lines:
       line_count += len(lines)
       data = "".join(lines).replace("\0", "\n\t")
-      output.write(data)
+      outstream.write(data)
   return line_count
 
 
@@ -1130,14 +934,14 @@ class AppVersionUpload(object):
   def _Hash(self, content):
     """Compute the hash of the content.
 
-    Arg:
+    Args:
       content: The data to hash as a string.
 
     Returns:
       The string representation of the hash.
     """
     h = sha.new(content).hexdigest()
-    return '%s_%s_%s_%s_%s' % (h[0:8], h[8:16], h[16:24], h[24:32], h[32:40])
+    return "%s_%s_%s_%s_%s" % (h[0:8], h[8:16], h[16:24], h[24:32], h[32:40])
 
   def AddFile(self, path, file_handle):
     """Adds the provided file to the list to be pushed to the server.
@@ -1150,7 +954,7 @@ class AppVersionUpload(object):
     assert file_handle is not None
 
     reason = appinfo.ValidFilename(path)
-    if reason != '':
+    if reason:
       logging.error(reason)
       return
 
@@ -1188,7 +992,14 @@ class AppVersionUpload(object):
     files_to_upload = {}
 
     def CloneFiles(url, files, file_type):
-      if len(files) == 0:
+      """Sends files to the given url.
+
+      Args:
+        url: the server URL to use.
+        files: a list of files
+        file_type: the type of the files
+      """
+      if not files:
         return
 
       StatusUpdate("Cloning %d %s file%s." %
@@ -1208,7 +1019,7 @@ class AppVersionUpload(object):
     CloneFiles("/api/appversion/cloneblobs", blobs_to_clone, "static")
     CloneFiles("/api/appversion/clonefiles", files_to_clone, "application")
 
-    logging.info('Files to upload: ' + str(files_to_upload))
+    logging.info("Files to upload: " + str(files_to_upload))
 
     self.files = files_to_upload
     return sorted(files_to_upload.iterkeys())
@@ -1280,6 +1091,7 @@ class AppVersionUpload(object):
     """
     logging.info("Reading app configuration.")
 
+    path = ""
     try:
       StatusUpdate("Scanning files on local disk.")
       num_files = 0
@@ -1313,7 +1125,7 @@ class AppVersionUpload(object):
 
     try:
       missing_files = self.Begin()
-      if len(missing_files) > 0:
+      if missing_files:
         StatusUpdate("Uploading %d files." % len(missing_files))
         num_files = 0
         for missing_file in missing_files:
@@ -1383,34 +1195,16 @@ def GetFileLength(fh):
   return length
 
 
-def GetPlatformToken(os_module=os, sys_module=sys, platform=sys.platform):
-  """Returns a 'User-agent' token for the host system platform.
-
-  Args:
-    os_module, sys_module, platform: Used for testing.
-
-  Returns:
-    String containing the platform token for the host system.
-  """
-  if hasattr(sys_module, "getwindowsversion"):
-    windows_version = sys_module.getwindowsversion()
-    version_info = ".".join(str(i) for i in windows_version[:4])
-    return platform + "/" + version_info
-  elif hasattr(os_module, "uname"):
-    uname = os_module.uname()
-    return "%s/%s" % (uname[0], uname[2])
-  else:
-    return "unknown"
-
-
-def GetUserAgent(get_version=GetVersionObject, get_platform=GetPlatformToken):
+def GetUserAgent(get_version=GetVersionObject,
+                 get_platform=appengine_rpc.GetPlatformToken):
   """Determines the value of the 'User-agent' header to use for HTTP requests.
 
   If the 'APPCFG_SDK_NAME' environment variable is present, that will be
   used as the first product token in the user-agent.
 
   Args:
-    get_version, get_platform: Used for testing.
+    get_version: Used for testing.
+    get_platform: Used for testing.
 
   Returns:
     String containing the 'user-agent' header value, which includes the SDK
@@ -1439,6 +1233,16 @@ def GetUserAgent(get_version=GetVersionObject, get_platform=GetPlatformToken):
   return " ".join(product_tokens)
 
 
+def GetSourceName(get_version=GetVersionObject):
+  """Gets the name of this source version."""
+  version = get_version()
+  if version is None:
+    release = "unknown"
+  else:
+    release = version["release"]
+  return "Google-appcfg-%s" % (release,)
+
+
 class AppCfgApp(object):
   """Singleton class to wrap AppCfg tool functionality.
 
@@ -1464,7 +1268,7 @@ class AppCfgApp(object):
   """
 
   def __init__(self, argv, parser_class=optparse.OptionParser,
-               rpc_server_class=HttpRpcServer,
+               rpc_server_class=appengine_rpc.HttpRpcServer,
                raw_input_fn=raw_input,
                password_input_fn=getpass.getpass,
                error_fh=sys.stderr):
@@ -1521,14 +1325,17 @@ class AppCfgApp(object):
     Catches any HTTPErrors raised by the action and prints them to stderr.
     """
     try:
-      self.action.function(self)
+      self.action(self)
     except urllib2.HTTPError, e:
       body = e.read()
       print >>self.error_fh, ("Error %d: --- begin server output ---\n"
                               "%s\n--- end server output ---" %
                               (e.code, body.rstrip("\n")))
+      return 1
     except yaml_errors.EventListenerError, e:
       print >>self.error_fh, ("Error parsing yaml file:\n%s" % e)
+      return 1
+    return 0
 
   def _GetActionDescriptions(self):
     """Returns a formatted string containing the short_descs for all actions."""
@@ -1548,7 +1355,9 @@ class AppCfgApp(object):
 
     class Formatter(optparse.IndentedHelpFormatter):
       """Custom help formatter that does not reformat the description."""
+
       def format_description(self, description):
+        """Very simple formatter."""
         return description + "\n"
 
     desc = self._GetActionDescriptions()
@@ -1600,7 +1409,7 @@ class AppCfgApp(object):
     parser.set_usage(action.usage)
     parser.set_description("%s\n%s" % (action.short_desc, action.long_desc))
     action.options(self, parser)
-    options, args = parser.parse_args(self.argv[1:])
+    options, unused_args = parser.parse_args(self.argv[1:])
     return parser, options
 
   def _PrintHelpAndExit(self, exit_code=2):
@@ -1641,15 +1450,24 @@ class AppCfgApp(object):
       server = self.rpc_server_class(
           self.options.server,
           lambda: (email, "password"),
+          GetUserAgent(),
+          GetSourceName(),
           host_override=self.options.host,
-          extra_headers={"Cookie": 'dev_appserver_login="%s:False"' % email},
           save_cookies=self.options.save_cookies)
       server.authenticated = True
       return server
 
+    if self.options.passin:
+      auth_tries = 1
+    else:
+      auth_tries = 3
+
     return self.rpc_server_class(self.options.server, GetUserCredentials,
+                                 GetUserAgent(), GetSourceName(),
                                  host_override=self.options.host,
-                                 save_cookies=self.options.save_cookies)
+                                 save_cookies=self.options.save_cookies,
+                                 auth_tries=auth_tries,
+                                 account_type="HOSTED_OR_GOOGLE")
 
   def _FindYaml(self, basepath, file_name):
     """Find yaml files in application directory.
@@ -1664,7 +1482,7 @@ class AppCfgApp(object):
     if not os.path.isdir(basepath):
       self.parser.error("Not a directory: %s" % basepath)
 
-    for yaml_file in (file_name + '.yaml', file_name + '.yml'):
+    for yaml_file in (file_name + ".yaml", file_name + ".yml"):
       yaml_path = os.path.join(basepath, yaml_file)
       if os.path.isfile(yaml_path):
         return yaml_path
@@ -1673,6 +1491,9 @@ class AppCfgApp(object):
 
   def _ParseAppYaml(self, basepath):
     """Parses the app.yaml file.
+
+    Args:
+      basepath: the directory of the application.
 
     Returns:
       An AppInfoExternal object.
@@ -1692,6 +1513,9 @@ class AppCfgApp(object):
   def _ParseIndexYaml(self, basepath):
     """Parses the index.yaml file.
 
+    Args:
+      basepath: the directory of the application.
+
     Returns:
       A single parsed yaml file or None if the file does not exist.
     """
@@ -1705,6 +1529,25 @@ class AppCfgApp(object):
       return index_defs
     return None
 
+  def _ParseCronYaml(self, basepath):
+    """Parses the cron.yaml file.
+
+    Args:
+      basepath: the directory of the application.
+
+    Returns:
+      A CronInfoExternal object.
+    """
+    file_name = self._FindYaml(basepath, "cron")
+    if file_name is not None:
+      fh = open(file_name, "r")
+      try:
+        cron_info = croninfo.LoadSingleCron(fh)
+      finally:
+        fh.close()
+      return cron_info
+    return None
+
   def Help(self):
     """Prints help for a specific action.
 
@@ -1716,7 +1559,7 @@ class AppCfgApp(object):
                         self._GetActionDescriptions())
 
     action = self.actions[self.args[0]]
-    self.parser, options = self._MakeSpecificParser(action)
+    self.parser, unused_options = self._MakeSpecificParser(action)
     self._PrintHelpAndExit(exit_code=0)
 
   def Update(self):
@@ -1745,8 +1588,13 @@ class AppCfgApp(object):
                      "%s\n--- end server output ---" %
                      (e.code, e.read().rstrip("\n")))
         print >> self.error_fh, (
-          "Your app was updated, but there was an error updating your indexes. "
-          "Please retry later with appcfg.py update_indexes.")
+            "Your app was updated, but there was an error updating your "
+            "indexes. Please retry later with appcfg.py update_indexes.")
+
+    cron_entries = self._ParseCronYaml(basepath)
+    if cron_entries:
+      cron_upload = CronEntryUpload(rpc_server, appyaml, cron_entries)
+      cron_upload.DoUpload()
 
   def _UpdateOptions(self, parser):
     """Adds update-specific options to 'parser'.
@@ -1785,6 +1633,20 @@ class AppCfgApp(object):
     parser.add_option("-f", "--force", action="store_true", dest="force_delete",
                       default=False,
                       help="Force deletion without being prompted.")
+
+  def UpdateCron(self):
+    """Updates any new or changed cron definitions."""
+    if len(self.args) != 1:
+      self.parser.error("Expected a single <directory> argument.")
+
+    basepath = self.args[0]
+    appyaml = self._ParseAppYaml(basepath)
+    rpc_server = self._GetRpcServer()
+
+    cron_entries = self._ParseCronYaml(basepath)
+    if cron_entries:
+      cron_upload = CronEntryUpload(rpc_server, appyaml, cron_entries)
+      cron_upload.DoUpload()
 
   def UpdateIndexes(self):
     """Updates indexes."""
@@ -1835,7 +1697,7 @@ class AppCfgApp(object):
     logs_requester.DownloadLogs()
 
   def _RequestLogsOptions(self, parser):
-    """Ads request_logs-specific options to 'parser'.
+    """Adds request_logs-specific options to 'parser'.
 
     Args:
       parser: An instance of OptionsParser.
@@ -1843,25 +1705,64 @@ class AppCfgApp(object):
     parser.add_option("-n", "--num_days", type="int", dest="num_days",
                       action="store", default=None,
                       help="Number of days worth of log data to get. "
-                           "The cut-off point is midnight UTC. "
-                           "Use 0 to get all available logs. "
-                           "Default is 1, unless --append is also given; "
-                           "then the default is 0.")
+                      "The cut-off point is midnight UTC. "
+                      "Use 0 to get all available logs. "
+                      "Default is 1, unless --append is also given; "
+                      "then the default is 0.")
     parser.add_option("-a", "--append", dest="append",
-                       action="store_true", default=False,
+                      action="store_true", default=False,
                       help="Append to existing file.")
     parser.add_option("--severity", type="int", dest="severity",
                       action="store", default=None,
                       help="Severity of app-level log messages to get. "
-                           "The range is 0 (DEBUG) through 4 (CRITICAL). "
-                           "If omitted, only request logs are returned.")
+                      "The range is 0 (DEBUG) through 4 (CRITICAL). "
+                      "If omitted, only request logs are returned.")
+
+  def CronInfo(self, now=None, output=sys.stdout):
+    """Displays information about cron definitions.
+
+    Args:
+      now: used for testing.
+      output: Used for testing.
+    """
+    if len(self.args) != 1:
+      self.parser.error("Expected a single <directory> argument.")
+    if now is None:
+      now = datetime.datetime.now()
+
+    basepath = self.args[0]
+    cron_entries = self._ParseCronYaml(basepath)
+    if cron_entries:
+      for entry in cron_entries.cron:
+        description = entry.description
+        if not description:
+          description = "<no description>"
+        print >>output, "\n%s:\nURL: %s\nSchedule: %s" % (description,
+                                                          entry.schedule,
+                                                          entry.url)
+        schedule = groctimespecification.GrocTimeSpecification(entry.schedule)
+        matches = schedule.GetMatches(now, self.options.num_runs)
+        for match in matches:
+          print >>output, "%s, %s from now" % (
+              match.strftime("%Y-%m-%d %H:%M:%S"), match - now)
+
+  def _CronInfoOptions(self, parser):
+    """Adds cron_info-specific options to 'parser'.
+
+    Args:
+      parser: An instance of OptionsParser.
+    """
+    parser.add_option("-n", "--num_runs", type="int", dest="num_runs",
+                      action="store", default=5,
+                      help="Number of runs of each cron job to display"
+                      "Default is 5")
 
   class Action(object):
     """Contains information about a command line action.
 
     Attributes:
-      function: An AppCfgApp function that will perform the appropriate
-        action.
+      function: The name of a function defined on AppCfg or its subclasses
+        that will perform the appropriate action.
       usage: A command line usage string.
       short_desc: A one-line description of the action.
       long_desc: A detailed description of the action.  Whitespace and
@@ -1879,39 +1780,56 @@ class AppCfgApp(object):
       self.long_desc = long_desc
       self.options = options
 
+    def __call__(self, appcfg):
+      """Invoke this Action on the specified AppCfg.
+
+      This calls the function of the appropriate name on AppCfg, and
+      respects polymophic overrides."""
+      method = getattr(appcfg, self.function)
+      return method()
+
   actions = {
 
       "help": Action(
-        function=Help,
-        usage="%prog help <action>",
-        short_desc="Print help for a specific action."),
+          function="Help",
+          usage="%prog help <action>",
+          short_desc="Print help for a specific action."),
 
       "update": Action(
-        function=Update,
-        usage="%prog [options] update <directory>",
-        options=_UpdateOptions,
-        short_desc="Create or update an app version.",
-        long_desc="""
+          function="Update",
+          usage="%prog [options] update <directory>",
+          options=_UpdateOptions,
+          short_desc="Create or update an app version.",
+          long_desc="""
 Specify a directory that contains all of the files required by
 the app, and appcfg.py will create/update the app version referenced
 in the app.yaml file at the top level of that directory.  appcfg.py
 will follow symlinks and recursively upload all files to the server.
 Temporary or source control files (e.g. foo~, .svn/*) will be skipped."""),
 
+
+
+
+
+
+
+
+
+
       "update_indexes": Action(
-        function=UpdateIndexes,
-        usage="%prog [options] update_indexes <directory>",
-        short_desc="Update application indexes.",
-        long_desc="""
+          function="UpdateIndexes",
+          usage="%prog [options] update_indexes <directory>",
+          short_desc="Update application indexes.",
+          long_desc="""
 The 'update_indexes' command will add additional indexes which are not currently
 in production as well as restart any indexes that were not completed."""),
 
       "vacuum_indexes": Action(
-        function=VacuumIndexes,
-        usage="%prog [options] vacuum_indexes <directory>",
-        options=_VacuumIndexesOptions,
-        short_desc="Delete unused indexes from application.",
-        long_desc="""
+          function="VacuumIndexes",
+          usage="%prog [options] vacuum_indexes <directory>",
+          options=_VacuumIndexesOptions,
+          short_desc="Delete unused indexes from application.",
+          long_desc="""
 The 'vacuum_indexes' command will help clean up indexes which are no longer
 in use.  It does this by comparing the local index configuration with
 indexes that are actually defined on the server.  If any indexes on the
@@ -1919,23 +1837,35 @@ server do not exist in the index configuration file, the user is given the
 option to delete them."""),
 
       "rollback": Action(
-        function=Rollback,
-        usage="%prog [options] rollback <directory>",
-        short_desc="Rollback an in-progress update.",
-        long_desc="""
+          function="Rollback",
+          usage="%prog [options] rollback <directory>",
+          short_desc="Rollback an in-progress update.",
+          long_desc="""
 The 'update' command requires a server-side transaction.  Use 'rollback'
 if you get an error message about another transaction being in progress
 and you are sure that there is no such transaction."""),
 
       "request_logs": Action(
-        function=RequestLogs,
-        usage="%prog [options] request_logs <directory> <output_file>",
-        options=_RequestLogsOptions,
-        short_desc="Write request logs in Apache common log format.",
-        long_desc="""
+          function="RequestLogs",
+          usage="%prog [options] request_logs <directory> <output_file>",
+          options=_RequestLogsOptions,
+          short_desc="Write request logs in Apache common log format.",
+          long_desc="""
 The 'request_logs' command exports the request logs from your application
 to a file.  It will write Apache common log format records ordered
 chronologically.  If output file is '-' stdout will be written."""),
+
+
+
+
+
+
+
+
+
+
+
+
 
   }
 
@@ -1944,7 +1874,9 @@ def main(argv):
   logging.basicConfig(format=("%(asctime)s %(levelname)s %(filename)s:"
                               "%(lineno)s %(message)s "))
   try:
-    AppCfgApp(argv).Run()
+    result = AppCfgApp(argv).Run()
+    if result:
+      sys.exit(result)
   except KeyboardInterrupt:
     StatusUpdate("Interrupted.")
     sys.exit(1)

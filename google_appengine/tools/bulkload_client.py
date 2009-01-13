@@ -20,6 +20,10 @@
 import os
 import sys
 
+sys.stderr.write("This version of bulkload_client.py has been deprecated; "
+                 "please use the version at the root of your Google App "
+                 "Engine SDK install.")
+
 if not hasattr(sys, 'version_info'):
   sys.stderr.write('Very old versions of Python are not supported. Please '
                    'use version 2.5 or greater.\n')

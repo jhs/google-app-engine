@@ -52,12 +52,6 @@ class StringProto(ProtocolBuffer.ProtocolMessage):
     if self.has_value_ and self.value_ != x.value_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_value_):
@@ -137,12 +131,6 @@ class Integer32Proto(ProtocolBuffer.ProtocolMessage):
     if self.has_value_ != x.has_value_: return 0
     if self.has_value_ and self.value_ != x.value_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -224,12 +212,6 @@ class Integer64Proto(ProtocolBuffer.ProtocolMessage):
     if self.has_value_ and self.value_ != x.value_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_value_):
@@ -310,12 +292,6 @@ class BoolProto(ProtocolBuffer.ProtocolMessage):
     if self.has_value_ and self.value_ != x.value_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_value_):
@@ -395,12 +371,6 @@ class DoubleProto(ProtocolBuffer.ProtocolMessage):
     if self.has_value_ and self.value_ != x.value_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_value_):
@@ -463,12 +433,6 @@ class VoidProto(ProtocolBuffer.ProtocolMessage):
   def Equals(self, x):
     if x is self: return 1
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1

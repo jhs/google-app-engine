@@ -38,6 +38,7 @@ SCRIPT_DIR = os.path.join(DIR_PATH, 'google', 'appengine', 'tools')
 
 EXTRA_PATHS = [
   DIR_PATH,
+  os.path.join(DIR_PATH, 'lib', 'antlr3'),
   os.path.join(DIR_PATH, 'lib', 'django'),
   os.path.join(DIR_PATH, 'lib', 'webob'),
   os.path.join(DIR_PATH, 'lib', 'yaml', 'lib'),
@@ -47,9 +48,13 @@ SCRIPT_EXCEPTIONS = {
   "dev_appserver.py" : "dev_appserver_main.py"
 }
 
-if __name__ == '__main__':
+def run_file(file_path, globals_):
+  """Execute the file at the specified path with the passed-in globals."""
   sys.path = EXTRA_PATHS + sys.path
-  script_name = os.path.basename(__file__)
+  script_name = os.path.basename(file_path)
   script_name = SCRIPT_EXCEPTIONS.get(script_name, script_name)
   script_path = os.path.join(SCRIPT_DIR, script_name)
-  execfile(script_path, globals())
+  execfile(script_path, globals_)
+
+if __name__ == '__main__':
+  run_file(__file__, globals())

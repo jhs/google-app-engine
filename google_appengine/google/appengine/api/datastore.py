@@ -257,7 +257,7 @@ def Delete(keys):
   if tx:
     tx.RecordModifiedKeys(keys)
 
-  resp = api_base_pb.VoidProto()
+  resp = datastore_pb.DeleteResponse()
   try:
     apiproxy_stub_map.MakeSyncCall('datastore_v3', 'Delete', req, resp)
   except apiproxy_errors.ApplicationError, err:
@@ -1089,7 +1089,8 @@ class Query(dict):
           'Inequality operators (%s) must be on the same property as the '
           'first sort order, if any sort orders are supplied' %
           ', '.join(self.INEQUALITY_OPERATORS))
-    elif property in datastore_types._SPECIAL_PROPERTIES:
+
+    if property in datastore_types._SPECIAL_PROPERTIES:
       if property == datastore_types._KEY_SPECIAL_PROPERTY:
         for value in values:
           if not isinstance(value, Key):

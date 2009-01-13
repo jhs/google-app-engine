@@ -54,12 +54,6 @@ class ImagesServiceError(ProtocolBuffer.ProtocolMessage):
     if x is self: return 1
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     return initialized
@@ -129,12 +123,6 @@ class ImagesServiceTransform(ProtocolBuffer.ProtocolMessage):
   def Equals(self, x):
     if x is self: return 1
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -355,12 +343,6 @@ class Transform(ProtocolBuffer.ProtocolMessage):
     if self.has_autolevels_ and self.autolevels_ != x.autolevels_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     return initialized
@@ -555,12 +537,6 @@ class ImageData(ProtocolBuffer.ProtocolMessage):
     if self.has_content_ and self.content_ != x.content_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_content_):
@@ -652,12 +628,6 @@ class OutputSettings(ProtocolBuffer.ProtocolMessage):
     if self.has_mime_type_ != x.has_mime_type_: return 0
     if self.has_mime_type_ and self.mime_type_ != x.mime_type_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -765,12 +735,6 @@ class ImagesTransformRequest(ProtocolBuffer.ProtocolMessage):
     if self.has_output_ != x.has_output_: return 0
     if self.has_output_ and self.output_ != x.output_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -906,12 +870,6 @@ class ImagesTransformResponse(ProtocolBuffer.ProtocolMessage):
     if self.has_image_ != x.has_image_: return 0
     if self.has_image_ and self.image_ != x.image_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1

@@ -76,10 +76,11 @@ from google.appengine.api import apiproxy_stub_map
 from google.appengine.api import appinfo
 from google.appengine.api import datastore_admin
 from google.appengine.api import datastore_file_stub
-from google.appengine.api import urlfetch_stub
 from google.appengine.api import mail_stub
+from google.appengine.api import urlfetch_stub
 from google.appengine.api import user_service_stub
 from google.appengine.api import yaml_errors
+from google.appengine.api.capabilities import capability_stub
 from google.appengine.api.memcache import memcache_stub
 
 from google.appengine.tools import dev_appserver_index
@@ -467,7 +468,8 @@ class ApplicationLoggingHandler(logging.Handler):
     outfile.write('</span>\n')
 
 
-_IGNORE_HEADERS = frozenset(['content-type', 'content-length'])
+_IGNORE_REQUEST_HEADERS = frozenset(['content-type', 'content-length',
+                                     'accept-encoding', 'transfer-encoding'])
 
 def SetupEnvironment(cgi_path,
                      relative_url,
@@ -504,7 +506,7 @@ def SetupEnvironment(cgi_path,
     env['USER_IS_ADMIN'] = '1'
 
   for key in headers:
-    if key in _IGNORE_HEADERS:
+    if key in _IGNORE_REQUEST_HEADERS:
       continue
     adjusted_name = key.replace('-', '_').upper()
     env['HTTP_' + adjusted_name] = ', '.join(headers.getheaders(key))
@@ -2135,6 +2137,12 @@ class FileDispatcher(URLDispatcher):
     return 'File dispatcher'
 
 
+_IGNORE_RESPONSE_HEADERS = frozenset([
+    'content-encoding', 'accept-encoding', 'transfer-encoding',
+    'server', 'date',
+    ])
+
+
 def RewriteResponse(response_file):
   """Interprets server-side headers and adjusts the HTTP response accordingly.
 
@@ -2150,6 +2158,8 @@ def RewriteResponse(response_file):
   Args:
     response_file: File-like object containing the full HTTP response including
       the response code, all headers, and the request body.
+    gmtime: Function which returns current time in a format matching standard
+      time.gmtime().
 
   Returns:
     Tuple (status_code, status_message, header, body) where:
@@ -2161,6 +2171,10 @@ def RewriteResponse(response_file):
       body: String containing the body of the response.
   """
   headers = mimetools.Message(response_file)
+
+  for h in _IGNORE_RESPONSE_HEADERS:
+    if h in headers:
+      del headers[h]
 
   response_status = '%d Good to go' % httplib.OK
 
@@ -2185,7 +2199,7 @@ def RewriteResponse(response_file):
   else:
     body = response_file.read()
 
-  headers['content-length'] = str(len(body))
+  headers['Content-Length'] = str(len(body))
 
   header_list = []
   for header in headers.headers:
@@ -2353,6 +2367,10 @@ def CreateRequestHandler(root_path, login_url, require_indexes=False,
           of the super class.
       """
       BaseHTTPServer.BaseHTTPRequestHandler.__init__(self, *args, **kwargs)
+
+    def version_string(self):
+      """Returns server's version string used for Server HTTP header"""
+      return self.server_version
 
     def do_GET(self):
       """Handle GET requests."""
@@ -2756,6 +2774,10 @@ def SetupStubs(app_id, **config):
   apiproxy_stub_map.apiproxy.RegisterStub(
     'memcache',
     memcache_stub.MemcacheServiceStub())
+
+  apiproxy_stub_map.apiproxy.RegisterStub(
+    'capability_service',
+    capability_stub.CapabilityServiceStub())
 
   try:
     from google.appengine.api.images import images_stub

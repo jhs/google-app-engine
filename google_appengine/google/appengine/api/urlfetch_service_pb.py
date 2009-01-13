@@ -57,12 +57,6 @@ class URLFetchServiceError(ProtocolBuffer.ProtocolMessage):
     if x is self: return 1
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     return initialized
@@ -145,12 +139,6 @@ class URLFetchRequest_Header(ProtocolBuffer.ProtocolMessage):
     if self.has_value_ != x.has_value_: return 0
     if self.has_value_ and self.value_ != x.value_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -319,12 +307,6 @@ class URLFetchRequest(ProtocolBuffer.ProtocolMessage):
     if self.has_followredirects_ != x.has_followredirects_: return 0
     if self.has_followredirects_ and self.followredirects_ != x.followredirects_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -497,12 +479,6 @@ class URLFetchResponse_Header(ProtocolBuffer.ProtocolMessage):
     if self.has_value_ and self.value_ != x.value_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_key_):
@@ -635,12 +611,6 @@ class URLFetchResponse(ProtocolBuffer.ProtocolMessage):
     if self.has_contentwastruncated_ != x.has_contentwastruncated_: return 0
     if self.has_contentwastruncated_ and self.contentwastruncated_ != x.contentwastruncated_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1

@@ -224,16 +224,6 @@ class Validated(object):
       raise ValidationError('Class \'%s\' does not have attribute \'%s\''
                             % (self.__class__, key))
 
-  def __eq__(self, other):
-    """Comparison operator."""
-    if isinstance(other, type(self)):
-      for attribute in self.ATTRIBUTES:
-        if getattr(self, attribute) != getattr(other, attribute):
-          return False
-      return True
-    else:
-      return False
-
   def __str__(self):
     """Formatted view of validated object and nested values."""
     return repr(self)
@@ -678,6 +668,113 @@ class Regex(Validator):
     return cast_value
 
 
+class _RegexStrValue(object):
+  """Simulates the regex object to support recomplation when necessary.
+
+  Used by the RegexStr class to dynamically build and recompile regular
+  expression attributes of a validated object.  This object replaces the normal
+  object returned from re.compile which is immutable.
+
+  When the value of this object is a string, that string is simply used as the
+  regular expression when recompilation is needed.  If the state of this object
+  is a list of strings, the strings are joined in to a single 'or' expression.
+  """
+
+  def __init__(self, attribute, value):
+    """Initialize recompilable regex value.
+
+    Args:
+      attribute: Attribute validator associated with this regex value.
+      value: Initial underlying python value for regex string.  Either a single
+        regex string or a list of regex strings.
+    """
+    self.__attribute = attribute
+    self.__value = value
+    self.__regex = None
+
+  def __AsString(self, value):
+    """Convert a value to appropriate string.
+
+    Returns:
+      String version of value with all carriage returns and line feeds removed.
+    """
+    if issubclass(self.__attribute.expected_type, str):
+      cast_value = TYPE_STR(value)
+    else:
+      cast_value = TYPE_UNICODE(value)
+
+    cast_value = cast_value.replace('\n', '')
+    cast_value = cast_value.replace('\r', '')
+    return cast_value
+
+  def __BuildRegex(self):
+    """Build regex string from state.
+
+    Returns:
+      String version of regular expression.  Sequence objects are constructed
+      as larger regular expression where each regex in the list is joined with
+      all the others as single 'or' expression.
+    """
+    if isinstance(self.__value, list):
+      value_list = self.__value
+      sequence = True
+    else:
+      value_list = [self.__value]
+      sequence = False
+
+    regex_list = []
+    for item in value_list:
+      regex_list.append(self.__AsString(item))
+
+    if sequence:
+      return '|'.join('(?:%s)' % item for item in regex_list)
+    else:
+      return regex_list[0]
+
+  def __Compile(self):
+    """Build regular expression object from state.
+
+    Returns:
+      Compiled regular expression based on internal value.
+    """
+    regex = self.__BuildRegex()
+    try:
+      return re.compile(regex)
+    except re.error, e:
+      raise ValidationError('Value \'%s\' does not compile: %s' % (regex, e), e)
+
+  @property
+  def regex(self):
+    """Compiled regular expression as described by underlying value."""
+    return self.__Compile()
+
+  def match(self, value):
+    """Match against internal regular expression.
+
+    Returns:
+      Regular expression object built from underlying value.
+    """
+    return re.match(self.__BuildRegex(), value)
+
+  def Validate(self):
+    """Ensure that regex string compiles."""
+    self.__Compile()
+
+  def __str__(self):
+    """Regular expression string as described by underlying value."""
+    return self.__BuildRegex()
+
+  def __eq__(self, other):
+    """Comparison against other regular expression string values."""
+    if isinstance(other, _RegexStrValue):
+      return self.__BuildRegex() == other.__BuildRegex()
+    return str(self) == other
+
+  def __ne__(self, other):
+    """Inequality operator for regular expression string value."""
+    return not self.__eq__(other)
+
+
 class RegexStr(Validator):
   """Validates that a string can compile as a regex without errors.
 
@@ -693,7 +790,8 @@ class RegexStr(Validator):
       AttributeDefinitionError if string_type is not a kind of string.
     """
     if default is not None:
-      default = re.compile(default)
+      default = _RegexStrValue(self, default)
+      re.compile(str(default))
     super(RegexStr, self).__init__(default)
     if (not issubclass(string_type, basestring) or
         string_type is basestring):
@@ -715,22 +813,15 @@ class RegexStr(Validator):
       ValueError when value does not compile as a regular expression.  TypeError
       when value does not match provided string type.
     """
-    if issubclass(self.expected_type, str):
-      cast_value = TYPE_STR(value)
-    else:
-      cast_value = TYPE_UNICODE(value)
-
-    cast_value = cast_value.replace('\n', '')
-    cast_value = cast_value.replace('\r', '')
-    try:
-      compiled = re.compile(cast_value)
-    except re.error, e:
-      raise ValidationError('Value \'%s\' does not compile: %s' % (value, e), e)
-    return compiled
+    if isinstance(value, _RegexStrValue):
+      return value
+    value = _RegexStrValue(self, value)
+    value.Validate()
+    return value
 
   def ToValue(self, value):
     """Returns the RE pattern for this validator."""
-    return value.pattern
+    return str(value)
 
 
 class Range(Validator):

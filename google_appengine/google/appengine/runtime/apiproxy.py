@@ -26,8 +26,9 @@ the Google Apphosting environment.
 import sys
 from google.net.proto import ProtocolBuffer
 from google.appengine import runtime
-from google.appengine.runtime import apiproxy_errors
+from google.appengine.api import apiproxy_rpc
 from google3.apphosting.runtime import _apphosting_runtime___python__apiproxy
+from google.appengine.runtime import apiproxy_errors
 
 OK                =  0
 RPC_FAILED        =  1
@@ -74,7 +75,7 @@ _ExceptionsMap = {
 
 }
 
-class RPC(object):
+class RPC(apiproxy_rpc.RPC):
   """A RPC object, suitable for talking to remote services.
 
   Each instance of this object can be used only once, and should not be reused.
@@ -82,73 +83,15 @@ class RPC(object):
   Stores the data members and methods for making RPC calls via the APIProxy.
   """
 
-  IDLE = 0
-  RUNNING = 1
-  FINISHING = 2
-
-  def __init__(self, package=None, call=None, request=None, response=None,
-               callback=None):
+  def __init__(self, *args, **kargs):
     """Constructor for the RPC object. All arguments are optional, and
     simply set members on the class. These data members will be
     overriden by values passed to MakeCall.
-
-    Args:
-      package: string, the package for the call
-      call: string, the call within the package
-      request: ProtocolMessage instance, appropriate for the arguments
-      response: ProtocolMessage instance, appropriate for the response
-      callback: callable, called when call is complete
     """
-    self.__exception = None
-    self.__traceback = None
+    super(RPC, self).__init__(*args, **kargs)
     self.__result_dict = {}
-    self.__state = RPC.IDLE
 
-    self.package = package
-    self.call = call
-    self.request = request
-    self.response = response
-    self.callback = callback
-
-
-  def MakeCall(self, package=None, call=None, request=None, response=None,
-               callback=None):
-    """Makes an asynchronous (i.e. non-blocking) API call within the
-    specified package for the specified call method. request and response must
-    be the appropriately typed ProtocolBuffers for the API call.
-    callback, if provided, will be called when the request completes
-    successfully or when an error occurs.  If an error has ocurred, the
-    exception() method on this class will return the error, which can be
-    accessed from the callback.
-
-    Args:
-      Same as constructor; see __init__.
-
-    Raises:
-      TypeError or AssertionError if an argument is of an invalid type.
-      AssertionError or RuntimeError is an RPC is already in use.
-    """
-    self.callback = callback or self.callback
-    self.package = package or self.package
-    self.call = call or self.call
-    self.request = request or self.request
-    self.response = response or self.response
-
-    assert self.__state is RPC.IDLE, ("RPC for %s.%s has already been started" %
-                                      (self.package, self.call))
-    assert self.callback is None or callable(self.callback)
-    assert isinstance(self.request, ProtocolBuffer.ProtocolMessage)
-    assert isinstance(self.response, ProtocolBuffer.ProtocolMessage)
-
-    e = ProtocolBuffer.Encoder()
-    self.request.Output(e)
-
-    self.__state = RPC.RUNNING
-    _apphosting_runtime___python__apiproxy.MakeCall(
-        self.package, self.call, e.buffer(), self.__result_dict,
-        self.__MakeCallDone, self)
-
-  def Wait(self):
+  def _WaitImpl(self):
     """Waits on the API call associated with this RPC. The callback,
     if provided, will be executed before Wait() returns. If this RPC
     is already complete, or if the RPC was never started, this
@@ -159,42 +102,32 @@ class RPC(object):
     """
     try:
       rpc_completed = _apphosting_runtime___python__apiproxy.Wait(self)
-    except runtime.DeadlineExceededError:
-      raise
-    except apiproxy_errors.InterruptedError:
+    except (runtime.DeadlineExceededError, apiproxy_errors.InterruptedError):
       raise
     except:
       exc_class, exc, tb = sys.exc_info()
       if (isinstance(exc, SystemError) and
-          exc.args == ('uncaught RPC exception',)):
+          exc.args[0] == 'uncaught RPC exception'):
         raise
       rpc = None
       if hasattr(exc, "_appengine_apiproxy_rpc"):
         rpc = exc._appengine_apiproxy_rpc
       new_exc = apiproxy_errors.InterruptedError(exc, rpc)
       raise new_exc.__class__, new_exc, tb
+    return True
 
-    assert rpc_completed, ("RPC for %s.%s was not completed, and no other " +
-                           "exception was raised " % (self.package, self.call))
+  def _MakeCallImpl(self):
+    assert isinstance(self.request, ProtocolBuffer.ProtocolMessage)
+    assert isinstance(self.response, ProtocolBuffer.ProtocolMessage)
 
-  def CheckSuccess(self):
-    """If there was an exception, raise it now.
+    e = ProtocolBuffer.Encoder()
+    self.request.Output(e)
 
-    Raises:
-      Exception of the API call or the callback, if any.
-    """
-    if self.exception and self.__traceback:
-      raise self.exception.__class__, self.exception, self.__traceback
-    if self.exception:
-      raise self.exception
+    self.__state = RPC.RUNNING
 
-  @property
-  def exception(self):
-    return self.__exception
-
-  @property
-  def state(self):
-    return self.__state
+    _apphosting_runtime___python__apiproxy.MakeCall(
+        self.package, self.call, e.buffer(), self.__result_dict,
+        self.__MakeCallDone, self)
 
   def __MakeCallDone(self):
     self.__state = RPC.FINISHING
@@ -210,7 +143,7 @@ class RPC(object):
         self.__exception = apiproxy_errors.CapabilityDisabledError(
             "The API call %s.%s() is temporarily unavailable." % (
             self.package, self.call))
-    elif _ExceptionsMap.has_key(self.__result_dict['error']):
+    elif self.__result_dict['error'] in _ExceptionsMap:
       exception_entry = _ExceptionsMap[self.__result_dict['error']]
       self.__exception = exception_entry[0](
           exception_entry[1] % (self.package, self.call))
@@ -219,13 +152,17 @@ class RPC(object):
         self.response.ParseFromString(self.__result_dict['result_string'])
       except Exception, e:
         self.__exception = e
-    if self.callback:
-      try:
-        self.callback()
-      except:
-        exc_class, self.__exception, self.__traceback = sys.exc_info()
-        self.__exception._appengine_apiproxy_rpc = self
-        raise
+    self.__Callback()
+
+def CreateRPC():
+  """Create a RPC instance. suitable for talking to remote services.
+
+  Each RPC instance can be used only once, and should not be reused.
+
+  Returns:
+    an instance of RPC object
+  """
+  return RPC()
 
 
 def MakeSyncCall(package, call, request, response):
@@ -240,7 +177,7 @@ def MakeSyncCall(package, call, request, response):
   Raises:
     See CheckSuccess() above.
   """
-  rpc = RPC()
+  rpc = CreateRPC()
   rpc.MakeCall(package, call, request, response)
   rpc.Wait()
   rpc.CheckSuccess()

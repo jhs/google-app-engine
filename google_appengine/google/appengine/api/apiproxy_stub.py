@@ -21,7 +21,7 @@
 
 
 
-
+from google.appengine.api import apiproxy_rpc
 from google.appengine.runtime import apiproxy_errors
 
 
@@ -48,6 +48,14 @@ class APIProxyStub(object):
     """
     self.__service_name = service_name
     self.__max_request_size = max_request_size
+
+  def CreateRPC(self):
+    """Creates RPC object instance.
+
+    Returns:
+      a instance of RPC.
+    """
+    return apiproxy_rpc.RPC(stub=self)
 
   def MakeSyncCall(self, service, call, request, response):
     """The main RPC entry point.

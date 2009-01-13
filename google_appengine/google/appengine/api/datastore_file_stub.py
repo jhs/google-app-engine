@@ -69,7 +69,11 @@ datastore_pb.Query.__hash__ = lambda self: hash(self.Encode())
 _MAXIMUM_RESULTS = 1000
 
 
-_MAX_QUERY_OFFSET = 4000
+_MAX_QUERY_OFFSET = 1000
+
+
+_MAX_QUERY_COMPONENTS = 100
+
 
 class _StoredEntity(object):
   """Simple wrapper around an entity stored by the stub.
@@ -221,6 +225,16 @@ class DatastoreFileStub(apiproxy_stub.APIProxyStub):
     if app_kind in self.__schema_cache:
       del self.__schema_cache[app_kind]
 
+  READ_PB_EXCEPTIONS = (ProtocolBuffer.ProtocolBufferDecodeError, LookupError,
+                        TypeError, ValueError)
+  READ_ERROR_MSG = ('Data in %s is corrupt or a different version. '
+                    'Try running with the --clear_datastore flag.\n%r')
+  READ_PY250_MSG = ('Are you using FloatProperty and/or GeoPtProperty? '
+                    'Unfortunately loading float values from the datastore '
+                    'file does not work with Python 2.5.0. '
+                    'Please upgrade to a newer Python 2.5 release or use '
+                    'the --clear_datastore flag.\n')
+
   def Read(self):
     """ Reads the datastore and history files into memory.
 
@@ -235,18 +249,21 @@ class DatastoreFileStub(apiproxy_stub.APIProxyStub):
 
     Also sets __next_id to one greater than the highest id allocated so far.
     """
-    pb_exceptions = (ProtocolBuffer.ProtocolBufferDecodeError, LookupError,
-                     TypeError, ValueError)
-    error_msg = ('Data in %s is corrupt or a different version. '
-                 'Try running with the --clear_datastore flag.\n%r')
-
     if self.__datastore_file and self.__datastore_file != '/dev/null':
       for encoded_entity in self.__ReadPickled(self.__datastore_file):
         try:
           entity = entity_pb.EntityProto(encoded_entity)
-        except pb_exceptions, e:
-          raise datastore_errors.InternalError(error_msg %
+        except self.READ_PB_EXCEPTIONS, e:
+          raise datastore_errors.InternalError(self.READ_ERROR_MSG %
                                                (self.__datastore_file, e))
+        except struct.error, e:
+          if (sys.version_info[0:3] == (2, 5, 0)
+              and e.message.startswith('unpack requires a string argument')):
+            raise datastore_errors.InternalError(self.READ_PY250_MSG +
+                                                 self.READ_ERROR_MSG %
+                                                 (self.__datastore_file, e))
+          else:
+            raise
 
         self._StoreEntity(entity)
 
@@ -258,8 +275,8 @@ class DatastoreFileStub(apiproxy_stub.APIProxyStub):
       for encoded_query, count in self.__ReadPickled(self.__history_file):
         try:
           query_pb = datastore_pb.Query(encoded_query)
-        except pb_exceptions, e:
-          raise datastore_errors.InternalError(error_msg %
+        except self.READ_PB_EXCEPTIONS, e:
+          raise datastore_errors.InternalError(self.READ_ERROR_MSG %
                                                (self.__history_file, e))
 
         if query_pb in self.__query_history:
@@ -439,13 +456,22 @@ class DatastoreFileStub(apiproxy_stub.APIProxyStub):
   def _Dynamic_RunQuery(self, query, query_result):
     if not self.__tx_lock.acquire(False):
       raise apiproxy_errors.ApplicationError(
-        datastore_pb.Error.BAD_REQUEST, "Can't query inside a transaction.")
+          datastore_pb.Error.BAD_REQUEST, 'Can\'t query inside a transaction.')
     else:
       self.__tx_lock.release()
 
     if query.has_offset() and query.offset() > _MAX_QUERY_OFFSET:
-       raise apiproxy_errors.ApplicationError(
-         datastore_pb.Error.BAD_REQUEST, "Too big query offset.")
+      raise apiproxy_errors.ApplicationError(
+          datastore_pb.Error.BAD_REQUEST, 'Too big query offset.')
+
+    num_components = len(query.filter_list()) + len(query.order_list())
+    if query.has_ancestor():
+      num_components += 1
+    if num_components > _MAX_QUERY_COMPONENTS:
+      raise apiproxy_errors.ApplicationError(
+          datastore_pb.Error.BAD_REQUEST,
+          ('query is too large. may not have more than %s filters'
+           ' + sort orders ancestor total' % _MAX_QUERY_COMPONENTS))
 
     app = query.app()
 

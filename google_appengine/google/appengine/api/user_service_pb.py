@@ -49,12 +49,6 @@ class UserServiceError(ProtocolBuffer.ProtocolMessage):
     if x is self: return 1
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     return initialized

@@ -379,12 +379,11 @@ class RequestHandler(object):
       debug_mode: True if the web application is running in debug mode
     """
     self.error(500)
-    lines = ''.join(traceback.format_exception(*sys.exc_info()))
-    logging.error(lines)
+    logging.exception(exception)
     if debug_mode:
+      lines = ''.join(traceback.format_exception(*sys.exc_info()))
       self.response.clear()
-      self.response.headers['Content-Type'] = 'text/plain'
-      self.response.out.write(lines)
+      self.response.out.write('<pre>%s</pre>' % (cgi.escape(lines, quote=True)))
 
   @classmethod
   def get_url(cls, *args, **kargs):

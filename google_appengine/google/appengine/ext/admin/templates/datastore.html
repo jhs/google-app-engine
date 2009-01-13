@@ -123,13 +123,13 @@
           <th>ID</th>
           <th>Key Name</th>
           {% for header in headers %}
-            <th style="cursor: pointer" onclick="document.location.href='{{ order_base_url }}&amp;order={% ifequal order header.name %}-{% endifequal %}{{ header.name|urlencode }}&amp;order_type={{ header.type|urlencode }}'"><a href="{{ order_base_url }}&amp;order={% ifequal order header.name %}-{% endifequal %}{{ header.name|urlencode }}&amp;order_type={{ header.type|urlencode }}">{{ header.name }}</a></th>
+            <th style="cursor: pointer" onclick="document.location.href='{{ order_base_url }}&amp;order={% ifequal order header.name %}-{% endifequal %}{{ header.name|urlencode }}&amp;order_type={{ header.type|urlencode }}'"><a href="{{ order_base_url }}&amp;order={% ifequal order header.name %}-{% endifequal %}{{ header.name|urlencode }}&amp;order_type={{ header.type|urlencode }}" onclick="return false">{{ header.name }}</a></th>
           {% endfor %}
         </tr>
         {% for entity in entities %}
           <tr class="{% if forloop.counter|divisibleby:2 %}even{% else %}odd{% endif %}">
             <td><input id="key{{ forloop.counter }}" type="checkbox" name="key{{ forloop.counter }}" value="{{ entity.key|escape }}" onclick="updateDeleteButtonAndCheckbox();"/></td>
-            <td onclick="location.href='{{ entity.edit_uri|escape }}'"><a href="{{ entity.edit_uri|escape }}" title="Edit entity #{{ entity.key|escape }}">{{ entity.shortened_key|escape }}</a></td>
+            <td onclick="location.href='{{ entity.edit_uri|escape }}'"><a href="{{ entity.edit_uri|escape }}" title="Edit entity #{{ entity.key|escape }}" onclick="return false">{{ entity.shortened_key|escape }}</a></td>
             <td>
               {% if entity.key_id %}
                 {{entity.key_id}}

@@ -142,6 +142,19 @@ class ProtocolMessage:
   def ParseASCIIIgnoreUnknown(self, ascii_string):
     raise AbstractMethod
 
+  def Equals(self, other):
+    raise AbstractMethod
+
+  def __eq__(self, other):
+    if other.__class__ is self.__class__:
+      return self.Equals(other)
+    return NotImplemented
+
+  def __ne__(self, other):
+    if other.__class__ is self.__class__:
+      return not self.Equals(other)
+    return NotImplemented
+
 
   def Output(self, e):
     dbg = []
@@ -279,29 +292,52 @@ class Encoder:
     return
 
   def putVarInt32(self, v):
-    if v >= (1L << 31) or v < -(1L << 31):
+
+    buf_append = self.buf.append
+    if v & 127 == v:
+      buf_append(v)
+      return
+    if v >= 0x80000000 or v < -0x80000000:
       raise ProtocolBufferEncodeError, "int32 too big"
-    self.putVarInt64(v)
+    if v < 0:
+      v += 0x10000000000000000
+    while True:
+      bits = v & 127
+      v >>= 7
+      if v:
+        bits |= 128
+      buf_append(bits)
+      if not v:
+        break
     return
 
   def putVarInt64(self, v):
-    if v >= (1L << 63) or v < -(1L << 63):
+    buf_append = self.buf.append
+    if v >= 0x8000000000000000 or v < -0x8000000000000000:
       raise ProtocolBufferEncodeError, "int64 too big"
     if v < 0:
-      v += (1L << 64)
-    self.putVarUint64(v)
+      v += 0x10000000000000000
+    while True:
+      bits = v & 127
+      v >>= 7
+      if v:
+        bits |= 128
+      buf_append(bits)
+      if not v:
+        break
     return
 
   def putVarUint64(self, v):
-    if v < 0 or v >= (1L << 64):
+    buf_append = self.buf.append
+    if v < 0 or v >= 0x10000000000000000:
       raise ProtocolBufferEncodeError, "uint64 too big"
-    while 1:
+    while True:
       bits = v & 127
       v >>= 7
-      if (v != 0):
+      if v:
         bits |= 128
-      self.buf.append(bits)
-      if v == 0:
+      buf_append(bits)
+      if not v:
         break
     return
 
@@ -327,15 +363,11 @@ class Encoder:
 
   def putPrefixedString(self, v):
     self.putVarInt32(len(v))
-    a = array.array('B')
-    a.fromstring(v)
-    self.buf.extend(a)
+    self.buf.fromstring(v)
     return
 
   def putRawString(self, v):
-    a = array.array('B')
-    a.fromstring(v)
-    self.buf.extend(a)
+    self.buf.fromstring(v)
 
 
 class Decoder:
@@ -421,10 +453,28 @@ class Decoder:
             | (e << 16) | (d << 8) | c)
 
   def getVarInt32(self):
-    v = self.getVarInt64()
-    if v >= (1L << 31) or v < -(1L << 31):
+    b = self.get8()
+    if not (b & 128):
+      return b
+
+    result = long(0)
+    shift = 0
+
+    while 1:
+      result |= (long(b & 127) << shift)
+      shift += 7
+      if not (b & 128):
+        if result >= 0x10000000000000000L:
+          raise ProtocolBufferDecodeError, "corrupted"
+        break
+      if shift >= 64: raise ProtocolBufferDecodeError, "corrupted"
+      b = self.get8()
+
+    if result >= 0x8000000000000000L:
+      result -= 0x10000000000000000L
+    if result >= 0x80000000L or result < -0x80000000L:
       raise ProtocolBufferDecodeError, "corrupted"
-    return v
+    return result
 
   def getVarInt64(self):
     result = self.getVarUint64()
@@ -440,7 +490,7 @@ class Decoder:
       b = self.get8()
       result |= (long(b & 127) << shift)
       shift += 7
-      if (b & 128) == 0:
+      if not (b & 128):
         if result >= (1L << 64): raise ProtocolBufferDecodeError, "corrupted"
         return result
     return result

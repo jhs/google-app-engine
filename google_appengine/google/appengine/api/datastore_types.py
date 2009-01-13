@@ -867,12 +867,45 @@ class Blob(str):
     encoded = base64.urlsafe_b64encode(self)
     return saxutils.escape(encoded)
 
+class ByteString(str):
+  """A byte-string type, appropriate for storing short amounts of indexed data.
+
+  This behaves identically to Blob, except it's used only for short, indexed
+  byte strings.
+  """
+
+  def __new__(cls, arg=None):
+    """Constructor.
+
+    We only accept str instances.
+
+    Args:
+      arg: optional str instance (default '')
+    """
+    if arg is None:
+      arg = ''
+    if isinstance(arg, str):
+      return super(ByteString, cls).__new__(cls, arg)
+
+    raise TypeError('ByteString() argument should be str instance, not %s' %
+                    type(arg).__name__)
+
+  def ToXml(self):
+    """Output a ByteString as XML.
+
+    Returns:
+      Base64 encoded version of itself for safe insertion in to an XML document.
+    """
+    encoded = base64.urlsafe_b64encode(self)
+    return saxutils.escape(encoded)
+
 
 _PROPERTY_MEANINGS = {
 
 
 
   Blob:              entity_pb.Property.BLOB,
+  ByteString:        entity_pb.Property.BYTESTRING,
   Text:              entity_pb.Property.TEXT,
   datetime.datetime: entity_pb.Property.GD_WHEN,
   Category:          entity_pb.Property.ATOM_CATEGORY,
@@ -887,6 +920,7 @@ _PROPERTY_MEANINGS = {
 
 _PROPERTY_TYPES = frozenset([
   Blob,
+  ByteString,
   bool,
   Category,
   datetime.datetime,
@@ -997,6 +1031,7 @@ def ValidatePropertyKey(name, value):
 
 _VALIDATE_PROPERTY_VALUES = {
   Blob: ValidatePropertyNothing,
+  ByteString: ValidatePropertyString,
   bool: ValidatePropertyNothing,
   Category: ValidatePropertyString,
   datetime.datetime: ValidatePropertyNothing,
@@ -1193,6 +1228,7 @@ def PackFloat(name, value, pbvalue):
 
 _PACK_PROPERTY_VALUES = {
   Blob: PackBlob,
+  ByteString: PackBlob,
   bool: PackBool,
   Category: PackString,
   datetime.datetime: PackDatetime,
@@ -1305,6 +1341,7 @@ _PROPERTY_CONVERSIONS = {
   entity_pb.Property.GD_POSTALADDRESS:  PostalAddress,
   entity_pb.Property.GD_RATING:         Rating,
   entity_pb.Property.BLOB:              Blob,
+  entity_pb.Property.BYTESTRING:        ByteString,
   entity_pb.Property.TEXT:              Text,
 }
 
@@ -1324,7 +1361,7 @@ def FromPropertyPb(pb):
 
   if pbval.has_stringvalue():
     value = pbval.stringvalue()
-    if meaning != entity_pb.Property.BLOB:
+    if meaning not in (entity_pb.Property.BLOB, entity_pb.Property.BYTESTRING):
       value = unicode(value.decode('utf-8'))
   elif pbval.has_int64value():
     value = long(pbval.int64value())
@@ -1388,6 +1425,7 @@ _PROPERTY_TYPE_STRINGS = {
     'float':            float,
     'key':              Key,
     'blob':             Blob,
+    'bytestring':       ByteString,
     'text':             Text,
     'user':             users.User,
     'atom:category':    Category,

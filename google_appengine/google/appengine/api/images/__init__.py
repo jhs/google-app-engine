@@ -30,6 +30,8 @@ Classes defined in this module:
 
 
 
+import struct
+
 from google.appengine.api import apiproxy_stub_map
 from google.appengine.api.images import images_service_pb
 from google.appengine.runtime import apiproxy_errors
@@ -83,6 +85,8 @@ class Image(object):
     self._image_data = image_data
     self._transforms = []
     self._transform_map = {}
+    self._width = None
+    self._height = None
 
   def _check_transform_limits(self, transform):
     """Ensure some simple limits on the number of transforms allowed.
@@ -103,6 +107,175 @@ class Image(object):
       raise BadRequestError("A '%s' transform has already been "
                             "requested on this image." % transform_name)
     self._transform_map[transform] = True
+
+  def _update_dimensions(self):
+    """Updates the width and height fields of the image.
+
+    Raises:
+      NotImageError if the image data is not an image.
+      BadImageError if the image data is corrupt.
+    """
+    size = len(self._image_data)
+    if size >= 6 and self._image_data.startswith("GIF"):
+      self._update_gif_dimensions()
+    elif size >= 8 and self._image_data.startswith("\x89PNG\x0D\x0A\x1A\x0A"):
+      self._update_png_dimensions()
+    elif size >= 2 and self._image_data.startswith("\xff\xD8"):
+      self._update_jpeg_dimensions()
+    elif (size >= 8 and (self._image_data.startswith("II\x2a\x00") or
+                         self._image_data.startswith("MM\x00\x2a"))):
+      self._update_tiff_dimensions()
+    elif size >= 2 and self._image_data.startswith("BM"):
+      self._update_bmp_dimensions()
+    elif size >= 4 and self._image_data.startswith("\x00\x00\x01\x00"):
+      self._update_ico_dimensions()
+    else:
+      raise NotImageError("Unrecognized image format")
+
+  def _update_gif_dimensions(self):
+    """Updates the width and height fields of the gif image.
+
+    Raises:
+      BadImageError if the image string is not a valid gif image.
+    """
+    size = len(self._image_data)
+    if size >= 10:
+      self._width, self._height = struct.unpack("<HH", self._image_data[6:10])
+    else:
+      raise BadImageError("Corrupt GIF format")
+
+  def _update_png_dimensions(self):
+    """Updates the width and height fields of the png image.
+
+    Raises:
+      BadImageError if the image string is not a valid png image.
+    """
+    size = len(self._image_data)
+    if size >= 24 and self._image_data[12:16] == "IHDR":
+      self._width, self._height = struct.unpack(">II", self._image_data[16:24])
+    else:
+      raise BadImageError("Corrupt PNG format")
+
+  def _update_jpeg_dimensions(self):
+    """Updates the width and height fields of the jpeg image.
+
+    Raises:
+      BadImageError if the image string is not a valid jpeg image.
+    """
+    size = len(self._image_data)
+    offset = 2
+    while offset < size:
+      while offset < size and ord(self._image_data[offset]) != 0xFF:
+        offset += 1
+      while offset < size and ord(self._image_data[offset]) == 0xFF:
+        offset += 1
+      if (offset < size and ord(self._image_data[offset]) & 0xF0 == 0xC0 and
+          ord(self._image_data[offset]) != 0xC4):
+        offset += 4
+        if offset + 4 < size:
+          self._height, self._width = struct.unpack(
+              ">HH",
+              self._image_data[offset:offset + 4])
+          break
+        else:
+          raise BadImageError("Corrupt JPEG format")
+      elif offset + 2 <= size:
+        offset += 1
+        offset += struct.unpack(">H", self._image_data[offset:offset + 2])[0]
+      else:
+        raise BadImageError("Corrupt JPEG format")
+    if self._height is None or self._width is None:
+      raise BadImageError("Corrupt JPEG format")
+
+  def _update_tiff_dimensions(self):
+    """Updates the width and height fields of the tiff image.
+
+    Raises:
+      BadImageError if the image string is not a valid tiff image.
+    """
+    size = len(self._image_data)
+    if self._image_data.startswith("II"):
+      endianness = "<"
+    else:
+      endianness = ">"
+    ifd_offset = struct.unpack(endianness + "I", self._image_data[4:8])[0]
+    if ifd_offset < size + 14:
+      ifd_size = struct.unpack(
+          endianness + "H",
+          self._image_data[ifd_offset:ifd_offset + 2])[0]
+      ifd_offset += 2
+      for unused_i in range(0, ifd_size):
+        if ifd_offset + 12 <= size:
+          tag = struct.unpack(
+              endianness + "H",
+              self._image_data[ifd_offset:ifd_offset + 2])[0]
+          if tag == 0x100 or tag == 0x101:
+            value_type = struct.unpack(
+                endianness + "H",
+                self._image_data[ifd_offset + 2:ifd_offset + 4])[0]
+            if value_type == 3:
+              format = endianness + "H"
+              end_offset = ifd_offset + 10
+            elif value_type == 4:
+              format = endianness + "I"
+              end_offset = ifd_offset + 12
+            else:
+              format = endianness + "B"
+              end_offset = ifd_offset + 9
+            if tag == 0x100:
+              self._width = struct.unpack(
+                  format,
+                  self._image_data[ifd_offset + 8:end_offset])[0]
+              if self._height is not None:
+                break
+            else:
+              self._height = struct.unpack(
+                  format,
+                  self._image_data[ifd_offset + 8:end_offset])[0]
+              if self._width is not None:
+                break
+          ifd_offset += 12
+        else:
+          raise BadImageError("Corrupt TIFF format")
+    if self._width is None or self._height is None:
+      raise BadImageError("Corrupt TIFF format")
+
+  def _update_bmp_dimensions(self):
+    """Updates the width and height fields of the bmp image.
+
+    Raises:
+      BadImageError if the image string is not a valid bmp image.
+    """
+    size = len(self._image_data)
+    if size >= 18:
+      header_length = struct.unpack("<I", self._image_data[14:18])[0]
+      if ((header_length == 40 or header_length == 108 or
+           header_length == 124 or header_length == 64) and size >= 26):
+        self._width, self._height = struct.unpack("<II",
+                                                  self._image_data[18:26])
+      elif header_length == 12 and size >= 22:
+        self._width, self._height = struct.unpack("<HH",
+                                                  self._image_data[18:22])
+      else:
+        raise BadImageError("Corrupt BMP format")
+    else:
+      raise BadImageError("Corrupt BMP format")
+
+  def _update_ico_dimensions(self):
+    """Updates the width and height fields of the ico image.
+
+    Raises:
+      BadImageError if the image string is not a valid ico image.
+    """
+    size = len(self._image_data)
+    if size >= 8:
+      self._width, self._height = struct.unpack("<BB", self._image_data[6:8])
+      if not self._width:
+        self._width = 256
+      if not self._height:
+        self._height = 256
+    else:
+      raise BadImageError("Corrupt ICO format")
 
   def resize(self, width=0, height=0):
     """Resize the image maintaining the aspect ratio.
@@ -332,7 +505,23 @@ class Image(object):
     self._image_data = response.image().content()
     self._transforms = []
     self._transform_map.clear()
+    self._width = None
+    self._height = None
     return self._image_data
+
+  @property
+  def width(self):
+    """Gets the width of the image."""
+    if self._width is None:
+      self._update_dimensions()
+    return self._width
+
+  @property
+  def height(self):
+    """Gets the height of the image."""
+    if self._height is None:
+      self._update_dimensions()
+    return self._height
 
 
 def resize(image_data, width=0, height=0, output_encoding=PNG):

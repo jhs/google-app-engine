@@ -777,7 +777,8 @@ class StringType(DataType):
       multiline = len(value) > 255 or value.find('\n') >= 0
     if not multiline:
       for sample_value in sample_values:
-        if len(sample_value) > 255 or sample_value.find('\n') >= 0:
+        if sample_value and (len(sample_value) > 255 or
+                             sample_value.find('\n') >= 0):
           multiline = True
           break
     if multiline:

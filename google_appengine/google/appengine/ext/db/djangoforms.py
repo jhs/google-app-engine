@@ -22,6 +22,10 @@ won't be able to use Django's db package, but you can use our
 db package instead, and create Django forms from it, either fully
 automatically, or with overrides.
 
+Note, you should not import these classes from this module.  Importing
+this module patches the classes in place, and you should continue to
+import them from google.appengine.db.
+
 Some of the code here is strongly inspired by Django's own ModelForm
 class (new in Django 0.97).  Our code also supports Django 0.96 (so as
 to be maximally compatible).  Note that our API is always similar to
@@ -76,6 +80,7 @@ Notes:
 
 
 import itertools
+import logging
 
 
 import django.core.exceptions
@@ -206,6 +211,15 @@ class Property(db.Property):
     if not isinstance(value, self.data_type):
       value = self.data_type(value)
     return value
+
+
+class UserProperty(db.Property):
+  """This class exists solely to log a warning when it is used."""
+
+  def __init__(self, *args, **kwds):
+    logging.warn("Please don't use modelforms.UserProperty; "
+                 "use db.UserProperty instead.")
+    super(UserProperty, self).__init__(*args, **kwds)
 
 
 class StringProperty(db.StringProperty):
@@ -374,20 +388,6 @@ class BooleanProperty(db.BooleanProperty):
     if isinstance(value, basestring) and value.lower() == 'false':
       return False
     return bool(value)
-
-
-class UserProperty(db.UserProperty):
-  __metaclass__ = monkey_patch
-
-  def get_form_field(self, **kwargs):
-    """Return a Django form field appropriate for a user property.
-
-    This defaults to a CharField whose initial value is the current
-    username.
-    """
-    defaults = {'initial': users.GetCurrentUser()}
-    defaults.update(kwargs)
-    return super(UserProperty, self).get_form_field(**defaults)
 
 
 class StringListProperty(db.StringListProperty):

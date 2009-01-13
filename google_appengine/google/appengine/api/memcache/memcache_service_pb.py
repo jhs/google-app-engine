@@ -49,12 +49,6 @@ class MemcacheServiceError(ProtocolBuffer.ProtocolMessage):
     if x is self: return 1
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     return initialized
@@ -123,12 +117,6 @@ class MemcacheGetRequest(ProtocolBuffer.ProtocolMessage):
     for e1, e2 in zip(self.key_, x.key_):
       if e1 != e2: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -247,12 +235,6 @@ class MemcacheGetResponse_Item(ProtocolBuffer.ProtocolMessage):
     if self.has_flags_ and self.flags_ != x.flags_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_key_):
@@ -343,12 +325,6 @@ class MemcacheGetResponse(ProtocolBuffer.ProtocolMessage):
     for e1, e2 in zip(self.item_, x.item_):
       if e1 != e2: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -518,12 +494,6 @@ class MemcacheSetRequest_Item(ProtocolBuffer.ProtocolMessage):
     if self.has_expiration_time_ and self.expiration_time_ != x.expiration_time_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_key_):
@@ -646,12 +616,6 @@ class MemcacheSetRequest(ProtocolBuffer.ProtocolMessage):
     for e1, e2 in zip(self.item_, x.item_):
       if e1 != e2: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -778,12 +742,6 @@ class MemcacheSetResponse(ProtocolBuffer.ProtocolMessage):
       if e1 != e2: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     return initialized
@@ -884,12 +842,6 @@ class MemcacheDeleteRequest_Item(ProtocolBuffer.ProtocolMessage):
     if self.has_delete_time_ and self.delete_time_ != x.delete_time_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_key_):
@@ -968,12 +920,6 @@ class MemcacheDeleteRequest(ProtocolBuffer.ProtocolMessage):
     for e1, e2 in zip(self.item_, x.item_):
       if e1 != e2: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -1085,12 +1031,6 @@ class MemcacheDeleteResponse(ProtocolBuffer.ProtocolMessage):
     for e1, e2 in zip(self.delete_status_, x.delete_status_):
       if e1 != e2: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -1221,12 +1161,6 @@ class MemcacheIncrementRequest(ProtocolBuffer.ProtocolMessage):
     if self.has_direction_ and self.direction_ != x.direction_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     if (not self.has_key_):
@@ -1333,12 +1267,6 @@ class MemcacheIncrementResponse(ProtocolBuffer.ProtocolMessage):
     if self.has_new_value_ and self.new_value_ != x.new_value_: return 0
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     return initialized
@@ -1400,12 +1328,6 @@ class MemcacheFlushRequest(ProtocolBuffer.ProtocolMessage):
     if x is self: return 1
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     return initialized
@@ -1456,12 +1378,6 @@ class MemcacheFlushResponse(ProtocolBuffer.ProtocolMessage):
     if x is self: return 1
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     return initialized
@@ -1511,12 +1427,6 @@ class MemcacheStatsRequest(ProtocolBuffer.ProtocolMessage):
   def Equals(self, x):
     if x is self: return 1
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -1668,12 +1578,6 @@ class MergedNamespaceStats(ProtocolBuffer.ProtocolMessage):
     if self.has_oldest_item_age_ != x.has_oldest_item_age_: return 0
     if self.has_oldest_item_age_ and self.oldest_item_age_ != x.oldest_item_age_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -1839,12 +1743,6 @@ class MemcacheStatsResponse(ProtocolBuffer.ProtocolMessage):
     if self.has_stats_ != x.has_stats_: return 0
     if self.has_stats_ and self.stats_ != x.stats_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1

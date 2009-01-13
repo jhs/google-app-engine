@@ -55,12 +55,6 @@ class MailServiceError(ProtocolBuffer.ProtocolMessage):
     if x is self: return 1
     return 1
 
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
-
   def IsInitialized(self, debug_strs=None):
     initialized = 1
     return initialized
@@ -143,12 +137,6 @@ class MailAttachment(ProtocolBuffer.ProtocolMessage):
     if self.has_data_ != x.has_data_: return 0
     if self.has_data_ and self.data_ != x.data_: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1
@@ -394,12 +382,6 @@ class MailMessage(ProtocolBuffer.ProtocolMessage):
     for e1, e2 in zip(self.attachment_, x.attachment_):
       if e1 != e2: return 0
     return 1
-
-  def __eq__(self, other):
-    return (other is not None) and (other.__class__ == self.__class__) and self.Equals(other)
-
-  def __ne__(self, other):
-    return not (self == other)
 
   def IsInitialized(self, debug_strs=None):
     initialized = 1

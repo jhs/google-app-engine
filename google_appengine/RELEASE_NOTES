@@ -3,6 +3,32 @@ All rights reserved.
 
 App Engine SDK - Release Notes
 
+Version 1.1.8 - January 7, 2008
+=================================
+  - Skip_files RegexStr validator allows lists to for regex-ors.
+      http://code.google.com/p/googleappengine/issues/detail?id=81
+  - sys.path and sys.argv are no longer reset for each request.
+      http://code.google.com/p/googleappengine/issues/detail?id=772
+  - New ByteString data type for the datastore.  Indexed non-text short-blob.
+  - UserProperty now takes auto_current_user and auto_current_user_add
+    attributes.
+  - Support for polymorphic models and queries.
+  - db.Model.order() now supports __key__.
+      http://code.google.com/p/googleappengine/issues/detail?id=884
+  - Urlfetch no longer sets content-length: 0 when there is no body.
+      http://code.google.com/p/googleappengine/issues/detail?id=817
+  - Get height and width of an image via the Images API.
+      http://code.google.com/p/googleappengine/issues/detail?id=435
+  - Limit auto-Bcc of email sender to the case where the email sender is the
+    currently-logged-in user.
+  - Adds limit of 100 order/filters on datastore query size to the SDK.
+  - Fix unicode support for the bulkloader
+      http://code.google.com/p/googleappengine/issues/detail?id=157
+  - Bulkload.py from the appengine/tools directory to the appengine/ directory
+  - Modify webapp to use logging.exception instead of logging.error.
+  - Additional fixes to SDK sanitizing response headers to match production.
+      http://code.google.com/p/googleappengine/issues/detail?id=198
+
 Version 1.1.7 - November 20, 2008
 =================================
   - Fixed an issue with urlfetch response headers.
